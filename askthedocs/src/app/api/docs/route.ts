@@ -9,7 +9,9 @@ import { nanoid } from "nanoid";
 export async function POST(req: NextRequest) {
   try {
     const userEmail = req.headers.get("x-user-email");
+    console.log("User email:", req.headers);
     if (!userEmail) {
+      console.log("Unauthorized access attempt");
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
