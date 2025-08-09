@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { inngest } from "@/inngest/client";
 import { qdrant } from "@/lib/vector/qdrant";
-import { redis } from "@/lib/cache/redis";
 import { saveIndexedDoc } from "@/lib/db/collections";
 import { nanoid } from "nanoid";
+import Ably from "ably";
 
+const ably = new Ably.Rest(process.env.ABLY_API_KEY!);
 // POST: Submit URL for crawling
 export async function POST(req: NextRequest) {
   try {
@@ -14,7 +15,7 @@ export async function POST(req: NextRequest) {
       console.log("Unauthorized access attempt");
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-
+    const channel = ably.channels.get(`crawl-${userEmail}`);
     const { url } = await req.json();
 
     if (!url || !url.startsWith("http")) {
@@ -63,21 +64,18 @@ export async function POST(req: NextRequest) {
     });
 
     // Notify via Redis PubSub
-    await redis.rpush(
-      `crawl-${userEmail}`,
-      JSON.stringify({
-        jobId,
-        status: "queued",
-        url,
-        message: "Documentation crawl started",
-      })
-    );
+    await channel.publish("progress", {
+      jobId,
+      status: "queued",
+      message: "Documentation crawl started",
+      url,
+    });
 
     return NextResponse.json({
       jobId,
       status: "queued",
       message: "Indexing started. This will take 3-5 minutes.",
-      subscribeChannel: `crawl-${userEmail}`,
+      channel: `crawl-${userEmail}`,
     });
   } catch (error) {
     console.error("Docs API error:", error);

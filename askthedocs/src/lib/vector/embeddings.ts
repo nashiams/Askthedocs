@@ -1,8 +1,9 @@
 import OpenAI from "openai";
 import { encoding_for_model } from "tiktoken";
 import { qdrant } from "./qdrant";
-import { nanoid } from "nanoid";
+// import { nanoid } from "nanoid";
 import { ExtractedSnippet } from "@/types/snippet";
+import { v4 as uuidv4 } from "uuid";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -69,7 +70,7 @@ export class EmbeddingService {
       // Create points for Qdrant
       for (let j = 0; j < batch.length; j++) {
         points.push({
-          id: nanoid(),
+          id: uuidv4(),
           vector: embeddings[j],
           payload: {
             ...batch[j],

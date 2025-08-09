@@ -4,6 +4,9 @@ import { redis } from "@/lib/cache/redis";
 import { updateIndexedDocStatus } from "@/lib/db/collections";
 import { embeddingService } from "@/lib/vector/embeddings";
 import type { ExtractedSnippet } from "@/types/snippet";
+import Ably from "ably";
+
+const ably = new Ably.Rest(process.env.ABLY_API_KEY!);
 
 export const crawlDocumentation = inngest.createFunction(
   {
@@ -14,7 +17,7 @@ export const crawlDocumentation = inngest.createFunction(
   { event: "docs/crawl.requested" },
   async ({ event, step }) => {
     const { url, userEmail, jobId } = event.data;
-
+    const channel = ably.channels.get(`crawl-${userEmail}`);
     try {
       // Step 1: Use fetch instead of Playwright for discovery
       const pages = await step.run("discover-pages", async () => {
@@ -37,15 +40,12 @@ export const crawlDocumentation = inngest.createFunction(
         console.log(`Found ${foundLinks.length} documentation pages`);
 
         // Update status
-        await redis.rpush(
-          `crawl-status:${userEmail}`,
-          JSON.stringify({
-            jobId,
-            status: "crawling",
-            message: `Found ${foundLinks.length} pages to index`,
-            totalPages: foundLinks.length,
-          })
-        );
+        await channel.publish("progress", {
+          jobId,
+          status: "crawling",
+          message: `Found ${foundLinks.length} pages to index`,
+          totalPages: foundLinks.length,
+        });
 
         return foundLinks;
       });
@@ -102,16 +102,13 @@ export const crawlDocumentation = inngest.createFunction(
 
             // Update progress
             const progress = Math.round(((i + 1) / pages.length) * 100);
-            await redis.rpush(
-              `crawl-status:${userEmail}`,
-              JSON.stringify({
-                jobId,
-                status: "crawling",
-                message: `Processed ${i + 1}/${pages.length} pages`,
-                progress: `${i + 1}/${pages.length}`,
-                percentage: progress,
-              })
-            );
+            await channel.publish("progress", {
+              jobId,
+              status: "crawling",
+              message: `Processed ${i + 1}/${pages.length} pages`,
+              progress: `${i + 1}/${pages.length}`,
+              percentage: progress,
+            });
 
             return pageSnippets;
           } catch (error) {
@@ -131,14 +128,11 @@ export const crawlDocumentation = inngest.createFunction(
 
         console.log(`Storing ${allSnippets.length} snippets`);
 
-        await redis.rpush(
-          `crawl-status:${userEmail}`,
-          JSON.stringify({
-            jobId,
-            status: "embedding",
-            message: `Creating embeddings for ${allSnippets.length} snippets...`,
-          })
-        );
+        await channel.publish("progress", {
+          jobId,
+          status: "embedding",
+          message: `Creating embeddings for ${allSnippets.length} snippets...`,
+        });
 
         // Add required fields for embedding service
         const snippetsWithMetadata = allSnippets.map((s) => ({
@@ -157,19 +151,16 @@ export const crawlDocumentation = inngest.createFunction(
         });
 
         // Send completion message
-        await redis.rpush(
-          `crawl-status:${userEmail}`,
-          JSON.stringify({
-            jobId,
-            status: "complete",
-            message: `Successfully indexed ${allSnippets.length} code examples from ${pages.length} pages!`,
-            stats: {
-              pages: pages.length,
-              snippets: allSnippets.length,
-              baseUrl: url,
-            },
-          })
-        );
+        await channel.publish("progress", {
+          jobId,
+          status: "complete",
+          message: `Successfully indexed ${allSnippets.length} code examples!`,
+          stats: {
+            pages: pages.length,
+            snippets: allSnippets.length,
+            baseUrl: url,
+          },
+        });
 
         console.log(`Crawl complete: ${allSnippets.length} snippets indexed`);
       });
@@ -186,14 +177,11 @@ export const crawlDocumentation = inngest.createFunction(
         error: error instanceof Error ? error.message : "Unknown error",
       });
 
-      await redis.rpush(
-        `crawl-status:${userEmail}`,
-        JSON.stringify({
-          jobId,
-          status: "error",
-          message: `Failed: ${error instanceof Error ? error.message : "Unknown error"}`,
-        })
-      );
+      await channel.publish("progress", {
+        jobId,
+        status: "error",
+        message: `Failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+      });
 
       throw error;
     }
