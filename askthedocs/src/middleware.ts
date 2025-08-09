@@ -1,23 +1,27 @@
+// middleware.ts - CORRECTED VERSION
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { auth } from "@/lib/auth/config";
+import { getToken } from "next-auth/jwt";
 
 export async function middleware(request: NextRequest) {
-  // Get session from NextAuth
-  const session = await auth();
+  // Use NextAuth's JWT helper instead of importing auth config
+  const token = await getToken({
+    req: request,
+    secret: process.env.NEXTAUTH_SECRET,
+  });
 
   // Check if user is authenticated
-  if (!session?.user?.email) {
+  if (!token?.email) {
     return NextResponse.json(
       { error: "Unauthorized access: Please login" },
       { status: 401 }
     );
   }
 
-  // Add user email to headers for API routes
+  // Add user info to headers
   const requestHeaders = new Headers(request.headers);
-  requestHeaders.set("x-user-email", session.user.email);
-  requestHeaders.set("x-user-id", session.user.id || "");
+  requestHeaders.set("x-user-email", token.email as string);
+  requestHeaders.set("x-user-id", token.sub || "");
 
   return NextResponse.next({
     request: {
@@ -29,10 +33,8 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     "/api/ask/:path*",
-    "/api/snippets/:path*",
+    "/api/docs/:path*",
+    "/api/compare/:path*",
     "/api/user/:path*",
-    "/api/docs/crawl/:path*",
-    "/api/admin/:path*",
-    // Don't protect auth routes or public endpoints
   ],
 };

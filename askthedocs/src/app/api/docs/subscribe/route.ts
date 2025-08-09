@@ -1,6 +1,6 @@
-// app/api/docs/subscribe/route.ts - Updated for Upstash
-import { redis } from "@/lib/cache/redis";
+// app/api/docs/subscribe/route.ts - FIXED
 import { NextRequest } from "next/server";
+import { redis } from "@/lib/cache/redis";
 
 export async function GET(req: NextRequest) {
   const userEmail = req.headers.get("x-user-email");
@@ -8,59 +8,64 @@ export async function GET(req: NextRequest) {
     return new Response("Unauthorized", { status: 401 });
   }
 
+  console.log(`Starting SSE for ${userEmail}`);
+
   const encoder = new TextEncoder();
 
-  // For Upstash, we need to poll instead of true subscribe
-  // because Upstash Redis REST API doesn't support long-lived connections
   const stream = new ReadableStream({
     async start(controller) {
-      const channel = `crawl-${userEmail}`;
-      let isActive = true;
+      // Send initial message
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({ status: "connected", message: "Waiting for updates..." })}\n\n`
+        )
+      );
 
-      // Poll for messages
-      const pollInterval = setInterval(async () => {
-        if (!isActive) {
-          clearInterval(pollInterval);
-          return;
-        }
+      let pollCount = 0;
+      const maxPolls = 150; // 5 minutes max (2 sec intervals)
 
+      const intervalId = setInterval(async () => {
         try {
-          // In Upstash, we'd typically use a list or stream instead of pubsub for this
-          // Let's use a different approach with lists
-          const rawMessage = await redis.lpop(`queue:${channel}`);
-          let message: any = null;
-          if (rawMessage) {
-            try {
-              message =
-                typeof rawMessage === "string"
-                  ? JSON.parse(rawMessage)
-                  : rawMessage;
-            } catch {
-              message = { status: undefined, data: rawMessage };
-            }
-          }
+          pollCount++;
+
+          // Get message from Redis list
+          const message = await redis.lpop(`crawl-status:${userEmail}`);
 
           if (message) {
-            const event = `data: ${JSON.stringify(message)}\n\n`;
-            controller.enqueue(encoder.encode(event));
+            console.log("Sending message:", message);
+            const data =
+              typeof message === "string" ? message : JSON.stringify(message);
+            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
 
             // Check if complete
-            if (message.status === "complete" || message.status === "error") {
-              isActive = false;
+            const parsed =
+              typeof message === "string" ? JSON.parse(message) : message;
+            if (parsed.status === "complete" || parsed.status === "error") {
+              clearInterval(intervalId);
               setTimeout(() => {
                 controller.close();
               }, 1000);
             }
+          } else if (pollCount >= maxPolls) {
+            // Timeout after 5 minutes
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ status: "timeout", message: "No updates received" })}\n\n`
+              )
+            );
+            clearInterval(intervalId);
+            controller.close();
           }
         } catch (error) {
-          console.error("Polling error:", error);
+          console.error("SSE error:", error);
+          clearInterval(intervalId);
+          controller.close();
         }
-      }, 1000); // Poll every second
+      }, 2000); // Poll every 2 seconds
 
-      // Cleanup
+      // Clean up on abort
       req.signal.addEventListener("abort", () => {
-        isActive = false;
-        clearInterval(pollInterval);
+        clearInterval(intervalId);
         controller.close();
       });
     },
@@ -71,6 +76,7 @@ export async function GET(req: NextRequest) {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
+      "X-Content-Type-Options": "nosniff",
     },
   });
 }

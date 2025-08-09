@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { encoding_for_model } from "tiktoken";
 import { qdrant } from "./qdrant";
 import { nanoid } from "nanoid";
+import { ExtractedSnippet } from "@/types/snippet";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -50,21 +51,11 @@ export class EmbeddingService {
   }
 
   // Embed and store snippets
-  async embedAndStoreSnippets(
-    snippets: Array<{
-      code: string;
-      language: string;
-      purpose: string;
-      sourceUrl: string;
-      docName: string;
-      section: string;
-      warning?: string;
-    }>
-  ) {
+  async embedAndStoreSnippets(snippets: ExtractedSnippet[]) {
     const points = [];
 
     // Process in batches of 20
-    const batchSize = 20;
+    const batchSize = parseInt(process.env.EMBEDDING_BATCH_SIZE || "20");
     for (let i = 0; i < snippets.length; i += batchSize) {
       const batch = snippets.slice(i, i + batchSize);
 
