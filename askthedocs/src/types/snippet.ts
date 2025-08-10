@@ -23,6 +23,6 @@ export interface SnippetPayload {
 
 // Define the search result type
 export interface SnippetSearchResult extends SnippetPayload {
-  baseUrl: any;
+  baseUrl: string;
   score: number;
 }

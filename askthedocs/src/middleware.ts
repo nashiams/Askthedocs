@@ -32,9 +32,9 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/api/ask/:path*",
+    "/api/test/:path*",
     "/api/docs/:path*",
-    "/api/compare/:path*",
+    "/api/chat/:path*",
     "/api/user/:path*",
   ],
 };

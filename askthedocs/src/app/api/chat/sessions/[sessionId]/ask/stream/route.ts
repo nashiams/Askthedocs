@@ -1,60 +1,77 @@
 import { NextRequest } from "next/server";
+import { ObjectId } from "mongodb";
+import { getDatabase } from "@/lib/db/mongodb";
 import OpenAI from "openai";
 import { embeddingService } from "@/lib/vector/embeddings";
-import { saveQuery } from "@/lib/db/collections";
+import type { ChatSession, Message } from "@/types/db";
+import { SnippetSearchResult } from "@/types/snippet";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
-export async function POST(req: NextRequest) {
+export async function POST(
+  req: NextRequest,
+  { params }: { params: { sessionId: string } }
+) {
   try {
     const userEmail = req.headers.get("x-user-email");
     if (!userEmail) {
       return new Response("Unauthorized", { status: 401 });
     }
 
+    const { sessionId } = params;
     const { query, model = "gpt-4o-mini" } = await req.json();
 
     if (!query?.trim()) {
       return new Response("Query is required", { status: 400 });
     }
 
-    // Search for relevant snippets
-    const snippets = await embeddingService.searchSnippets(query, 5);
+    if (!ObjectId.isValid(sessionId)) {
+      return new Response("Invalid session ID", { status: 400 });
+    }
 
-    if (snippets.length === 0) {
-      return new Response(
-        `data: ${JSON.stringify({
-          type: "error",
-          content:
-            "I couldn't find relevant information in the indexed documentation.",
-        })}\n\n`,
-        {
-          headers: {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            Connection: "keep-alive",
-          },
-        }
+    const db = await getDatabase();
+    const sessions = db.collection<ChatSession>("sessions");
+    const messages = db.collection<Message>("messages");
+
+    const session = await sessions.findOne({
+      _id: new ObjectId(sessionId),
+      userId: userEmail,
+    });
+
+    if (!session) {
+      return new Response("Session not found", { status: 404 });
+    }
+
+    // Save user message
+    const userMessage: Message = {
+      _id: new ObjectId(),
+      sessionId: new ObjectId(sessionId),
+      role: "user",
+      content: query,
+      query: query,
+      timestamp: new Date(),
+    };
+    await messages.insertOne(userMessage);
+
+    // Get snippets from attached docs
+    let snippets: SnippetSearchResult[] = [];
+    if (session.indexedDocs && session.indexedDocs.length > 0) {
+      const searchResults = await embeddingService.searchSnippets(query, 5);
+      snippets = searchResults.filter((s) =>
+        session.indexedDocs.some(
+          (docUrl) => s.baseUrl === docUrl || s.sourceUrl?.startsWith(docUrl)
+        )
       );
     }
 
-    // Build context
-    const context = snippets
-      .map(
-        (s) =>
-          `[Source: ${s.sourceUrl}]\n${s.purpose}\n\`\`\`${s.language}\n${s.code}\n\`\`\``
-      )
-      .join("\n\n---\n\n");
-
-    // Create streaming response
     const encoder = new TextEncoder();
 
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          // Send initial data (snippets and sources)
+          // Send metadata first
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({
@@ -65,35 +82,55 @@ export async function POST(req: NextRequest) {
             )
           );
 
-          // Stream the main answer
+          if (snippets.length === 0) {
+            const message = session.indexedDocs?.length
+              ? "I couldn't find relevant information in the attached documentation."
+              : "Please attach documentation to this chat first.";
+
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ type: "chunk", content: message })}\n\n`
+              )
+            );
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ type: "done", tokensUsed: 0 })}\n\n`
+              )
+            );
+
+            // Save message
+            await messages.insertOne({
+              _id: new ObjectId(),
+              sessionId: new ObjectId(sessionId),
+              role: "assistant",
+              content: message,
+              tokensUsed: 0,
+              timestamp: new Date(),
+            });
+
+            controller.close();
+            return;
+          }
+
+          const context = snippets
+            .map(
+              (s) =>
+                `[Source: ${s.sourceUrl}]\n${s.purpose}\n\`\`\`${s.language}\n${s.code}\n\`\`\``
+            )
+            .join("\n\n---\n\n");
+
+          // Stream the response
           const completion = await openai.chat.completions.create({
             model,
             messages: [
               {
                 role: "system",
-                content: `You are a documentation assistant helping developers who struggle with reading docs.
-                
-                STRUCTURE YOUR ANSWER LIKE THIS:
-                
-                1. **One-line answer** - Direct solution
-                2. **Big Picture** (2-3 lines) - Explain the concept/flow
-                3. **WHERE THIS GOES** - Specify exact file location
-                4. **Code Example** with:
-                   - The CRITICAL part highlighted with comments
-                   - Show what happens when it works
-                   - Show what error you get when it fails
-                5. **What You'll See** - Show actual console output or error messages
-                
-                IMPORTANT RULES:
-                - Point out the EXACT error name
-                - Show WHERE to put code (which file/folder)
-                - Include actual error output users will see
-                - If uncertain, prefix with "Likely:" or "Probably:"
-                - NO emojis in code comments`,
+                content:
+                  "You are a documentation assistant. Structure: 1) Direct solution 2) Big Picture 3) WHERE THIS GOES 4) Code example 5) Output/errors. Be concise.",
               },
               {
                 role: "user",
-                content: `Question: ${query}\n\nRelevant documentation:\n${context}`,
+                content: `Question: ${query}\n\nDocumentation:\n${context}`,
               },
             ],
             temperature: 0.3,
@@ -103,24 +140,17 @@ export async function POST(req: NextRequest) {
 
           let fullAnswer = "";
           let buffer = "";
-          let tokenCount = 0;
 
-          // Stream chunks as they arrive - batch them for better performance
           for await (const chunk of completion) {
             const content = chunk.choices[0]?.delta?.content || "";
             if (content) {
               fullAnswer += content;
               buffer += content;
-              tokenCount++;
 
-              // Send buffer when it's big enough or contains a newline
               if (buffer.length > 50 || buffer.includes("\n")) {
                 controller.enqueue(
                   encoder.encode(
-                    `data: ${JSON.stringify({
-                      type: "chunk",
-                      content: buffer,
-                    })}\n\n`
+                    `data: ${JSON.stringify({ type: "chunk", content: buffer })}\n\n`
                   )
                 );
                 buffer = "";
@@ -128,32 +158,26 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // Send any remaining buffer
           if (buffer) {
             controller.enqueue(
               encoder.encode(
-                `data: ${JSON.stringify({
-                  type: "chunk",
-                  content: buffer,
-                })}\n\n`
+                `data: ${JSON.stringify({ type: "chunk", content: buffer })}\n\n`
               )
             );
           }
 
-          // Get comparison suggestions (non-streaming) - with better prompt
+          // Get comparisons
           const comparisonsResponse = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
               {
                 role: "system",
-                content: `Suggest 2-3 similar technologies for comparison.
-                Return ONLY a JSON array, no markdown, no explanation.
-                Example response: ["mongoose","typeorm","prisma"]
-                If no good comparisons exist, return empty array: []`,
+                content:
+                  "Suggest 2-3 similar technologies. Return ONLY JSON array.",
               },
               {
                 role: "user",
-                content: `User is learning about: ${query.substring(0, 100)}`,
+                content: `Learning about: ${query.substring(0, 100)}`,
               },
             ],
             temperature: 0.5,
@@ -162,65 +186,58 @@ export async function POST(req: NextRequest) {
 
           let comparisons = [];
           try {
-            const comparisonsText =
-              comparisonsResponse.choices[0].message.content || "[]";
-            // Clean the response - remove markdown if GPT added it
-            const cleanedText = comparisonsText
-              .replace(/```json\n?/g, "")
-              .replace(/```\n?/g, "")
-              .trim();
-            comparisons = JSON.parse(cleanedText);
+            const text = comparisonsResponse.choices[0].message.content || "[]";
+            comparisons = JSON.parse(
+              text.replace(/```json\n?|```\n?/g, "").trim()
+            );
           } catch (e) {
-            console.error("Failed to parse comparisons:", e);
             comparisons = [];
           }
 
-          // Send comparisons
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({
-                type: "comparisons",
-                comparisons,
-              })}\n\n`
+              `data: ${JSON.stringify({ type: "comparisons", comparisons })}\n\n`
             )
           );
 
-          // Calculate actual token usage
-          const tokensUsed =
-            completion.usage?.total_tokens || Math.floor(tokenCount * 1.3);
+          const tokensUsed = Math.floor(fullAnswer.length / 4);
 
-          // Send completion event
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({
-                type: "done",
-                tokensUsed,
-                model,
-              })}\n\n`
+              `data: ${JSON.stringify({ type: "done", tokensUsed, model })}\n\n`
             )
           );
 
-          // Save to history (fire and forget)
-          saveQuery({
-            userEmail,
-            query,
-            answer: fullAnswer,
-            snippets: snippets.slice(0, 3).map((s) => ({
-              code: s.code,
-              url: s.sourceUrl,
-              purpose: s.purpose,
-            })),
+          // Save assistant message
+          await messages.insertOne({
+            _id: new ObjectId(),
+            sessionId: new ObjectId(sessionId),
+            role: "assistant",
+            content: fullAnswer,
+            sources: [...new Set(snippets.map((s) => s.sourceUrl))],
             tokensUsed,
-            model,
-          }).catch(console.error);
+            timestamp: new Date(),
+          });
+
+          // Update session
+          if (session.title === "New Chat") {
+            const title =
+              query.substring(0, 50) + (query.length > 50 ? "..." : "");
+            await sessions.updateOne(
+              { _id: new ObjectId(sessionId) },
+              { $set: { title, updatedAt: new Date() } }
+            );
+          } else {
+            await sessions.updateOne(
+              { _id: new ObjectId(sessionId) },
+              { $set: { updatedAt: new Date() } }
+            );
+          }
         } catch (error) {
           console.error("Stream error:", error);
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({
-                type: "error",
-                content: "Failed to generate response",
-              })}\n\n`
+              `data: ${JSON.stringify({ type: "error", content: "Failed to generate response" })}\n\n`
             )
           );
         } finally {
@@ -234,11 +251,10 @@ export async function POST(req: NextRequest) {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
-        "X-Content-Type-Options": "nosniff",
       },
     });
   } catch (error) {
-    console.error("Ask stream error:", error);
+    console.error("Stream session ask error:", error);
     return new Response("Internal server error", { status: 500 });
   }
 }
