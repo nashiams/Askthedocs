@@ -64,26 +64,34 @@ export class EmbeddingService {
       const texts = batch.map(
         (snippet) => `${snippet.purpose}\n${snippet.language}\n${snippet.code}`
       );
+      try {
+        const embeddings = await this.createEmbeddings(texts);
 
-      const embeddings = await this.createEmbeddings(texts);
+        // Create points for Qdrant
+        const batchPoints = [];
+        for (let j = 0; j < batch.length; j++) {
+          batchPoints.push({
+            id: uuidv4(),
+            vector: embeddings[j],
+            payload: {
+              ...batch[j],
+              tokens: this.countTokens(batch[j].code),
+              indexedAt: new Date().toISOString(),
+            },
+          });
+        }
 
-      // Create points for Qdrant
-      for (let j = 0; j < batch.length; j++) {
-        points.push({
-          id: uuidv4(),
-          vector: embeddings[j],
-          payload: {
-            ...batch[j],
-            tokens: this.countTokens(batch[j].code),
-            indexedAt: new Date().toISOString(),
-          },
-        });
+        // Store in Qdrant
+        await qdrant.upsertSnippets(batchPoints);
+        console.log(
+          `Stored batch ${i / batchSize + 1}: ${batchPoints.length} snippets`
+        );
+        points.push(...batchPoints);
+      } catch (error) {
+        console.error(`Failed to process batch at index ${i}:`, error);
+        // Continue with next batch instead of failing completely
       }
     }
-
-    // Store in Qdrant
-    await qdrant.upsertSnippets(points);
-
     return {
       stored: points.length,
       totalTokens: points.reduce((sum, p) => sum + p.payload.tokens, 0),

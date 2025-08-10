@@ -140,13 +140,15 @@ export async function POST(req: NextRequest) {
     // Check if already indexed (do this before Google check to save API calls)
     const existing = await qdrant.scroll({
       collection_name: "code_snippets",
-      scroll_filter: {
-        must: [{ key: "baseUrl", match: { value: url } }],
-      },
-      limit: 1,
+      limit: 100,
+      with_payload: ["baseUrl"],
     });
 
-    if (existing.points && existing.points.length > 0) {
+    const alreadyIndexed = existing.points?.some(
+      (point) => point.payload?.baseUrl === url
+    );
+
+    if (alreadyIndexed) {
       return NextResponse.json({
         message: "Documentation already indexed",
         status: "ready",
