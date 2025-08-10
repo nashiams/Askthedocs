@@ -1,10 +1,41 @@
-import { MongoClient } from "mongodb";
+import { MongoClient, Db } from "mongodb";
 
 const uri = process.env.MONGO_URI || "";
 
-const client = new MongoClient(uri);
+let cachedClient: MongoClient | null = null;
+let cachedDb: Db | null = null;
 
-const database = client.db("Askthedocs");
-console.log("Pinged your deployment. You successfully connected to MongoDB!");
+export async function getDatabase(): Promise<Db> {
+  // Return cached connection if exists
+  if (cachedDb && cachedClient) {
+    return cachedDb;
+  }
 
-export default database;
+  if (!uri) {
+    throw new Error("MONGO_URI is not defined");
+  }
+
+  try {
+    // Create new connection if not cached
+    if (!cachedClient) {
+      cachedClient = new MongoClient(uri);
+      await cachedClient.connect();
+      console.log("Successfully connected to MongoDB!");
+    }
+
+    cachedDb = cachedClient.db("Askthedocs");
+    return cachedDb;
+  } catch (error) {
+    console.error("MongoDB connection error:", error);
+    throw error;
+  }
+}
+
+// Optional: Close connection
+export async function closeDatabase() {
+  if (cachedClient) {
+    await cachedClient.close();
+    cachedClient = null;
+    cachedDb = null;
+  }
+}

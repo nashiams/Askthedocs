@@ -1,5 +1,5 @@
 import { ObjectId } from "mongodb";
-import database from "./mongodb";
+import { getDatabase } from "./mongodb";
 import { Query, User } from "@/types/db";
 
 // User operations
@@ -9,7 +9,8 @@ export async function createOrUpdateUser(userData: {
   provider: "google" | "github";
   providerId: string;
 }) {
-  const users = database.collection<User>("users");
+  const db = await getDatabase();
+  const users = db.collection<User>("users");
 
   const result = await users.findOneAndUpdate(
     { email: userData.email },
@@ -30,12 +31,14 @@ export async function createOrUpdateUser(userData: {
 }
 
 export async function findUserByEmail(email: string) {
-  const users = database.collection<User>("users");
+  const db = await getDatabase();
+  const users = db.collection<User>("users");
   return users.findOne({ email });
 }
 
 export async function incrementQueryCount(email: string) {
-  const users = database.collection<User>("users");
+  const db = await getDatabase();
+  const users = db.collection<User>("users");
   return users.updateOne({ email }, { $inc: { queryCount: 1 } });
 }
 
@@ -52,7 +55,8 @@ export async function saveQuery(queryData: {
   tokensUsed: number;
   model: string;
 }) {
-  const queries = database.collection<Query>("queries");
+  const db = await getDatabase();
+  const queries = db.collection<Query>("queries");
 
   const result = await queries.insertOne({
     ...queryData,
@@ -66,7 +70,8 @@ export async function saveQuery(queryData: {
 }
 
 export async function getUserQueries(email: string, limit: number = 20) {
-  const queries = database.collection<Query>("queries");
+  const db = await getDatabase();
+  const queries = db.collection<Query>("queries");
 
   return queries
     .find({ userEmail: email })
@@ -76,7 +81,8 @@ export async function getUserQueries(email: string, limit: number = 20) {
 }
 
 export async function updateQueryFeedback(queryId: string, helpful: boolean) {
-  const queries = database.collection<Query>("queries");
+  const db = await getDatabase();
+  const queries = db.collection<Query>("queries");
 
   return queries.updateOne(
     { _id: new ObjectId(queryId) },
@@ -87,7 +93,8 @@ export async function updateQueryFeedback(queryId: string, helpful: boolean) {
 // Stats operations
 export async function getUserStats(email: string) {
   const user = await findUserByEmail(email);
-  const queries = database.collection<Query>("queries");
+  const db = await getDatabase();
+  const queries = db.collection<Query>("queries");
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -111,15 +118,14 @@ export async function getUserStats(email: string) {
   };
 }
 
-// Add these functions to your existing collections.ts
-
+// Indexed docs operations
 export async function saveIndexedDoc(data: {
   url: string;
   userEmail: string;
   jobId: string;
   status: string;
 }) {
-  const db = database;
+  const db = await getDatabase();
   const indexed_docs = db.collection("indexed_docs");
 
   return indexed_docs.insertOne({
@@ -134,7 +140,7 @@ export async function updateIndexedDocStatus(
   status: string,
   metadata?: any
 ) {
-  const db = database;
+  const db = await getDatabase();
   const indexed_docs = db.collection("indexed_docs");
 
   return indexed_docs.updateOne(
@@ -147,4 +153,11 @@ export async function updateIndexedDocStatus(
       },
     }
   );
+}
+
+export async function getIndexedDocStatus(jobId: string) {
+  const db = await getDatabase();
+  const indexed_docs = db.collection("indexed_docs");
+
+  return indexed_docs.findOne({ jobId });
 }
