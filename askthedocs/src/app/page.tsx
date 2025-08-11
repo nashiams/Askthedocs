@@ -345,7 +345,7 @@ export default function Chat() {
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
                     onKeyPress={handleKeyPress}
-                    placeholder="Ask anything"
+                    placeholder="Insert the Docs"
                     className="w-full bg-transparent text-white placeholder-gray-400 p-4 pr-16 resize-none focus:outline-none min-h-[56px] max-h-32 text-base rounded-full"
                     rows={1}
                   />
@@ -383,7 +383,7 @@ export default function Chat() {
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="Ask anything"
+                placeholder="Insert the Docs"
                 className="w-full bg-transparent text-white placeholder-gray-400 p-4 pr-16 resize-none focus:outline-none min-h-[56px] max-h-32 text-base rounded-full"
                 rows={1}
               />
