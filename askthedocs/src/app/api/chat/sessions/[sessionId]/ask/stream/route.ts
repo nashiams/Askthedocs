@@ -126,7 +126,16 @@ export async function POST(
               {
                 role: "system",
                 content:
-                  "You are a documentation assistant. Structure: 1) Direct solution 2) Big Picture 3) WHERE THIS GOES 4) Code example 5) Output/errors. Be concise.",
+                  `You are a documentation assistant helping developers understand code.
+          
+                  STRUCTURE YOUR ANSWER:
+                  1. Direct solution first
+                  2. Big Picture (2-3 lines max)
+                  3. WHERE THIS GOES - specify file location
+                  4. Code example with key parts highlighted
+                  5. What you'll see - actual output/errors
+                  
+                  Keep it concise. Point out exact error names. No emojis in code.`,
               },
               {
                 role: "user",

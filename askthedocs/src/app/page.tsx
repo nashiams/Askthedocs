@@ -224,7 +224,7 @@ export default function Chat() {
                 <Menu className="w-5 h-5" />
               </button>
               <span className="font-normal font-sans text-sm md:text-base">
-                Askthedocs
+                Askthedocs 
               </span>
             </div>
             <div className="flex items-center gap-2 md:gap-4">
@@ -241,7 +241,7 @@ export default function Chat() {
                     AI That Actually Read the Docs
                   </h1>
                   <p className="text-gray-300 text-base md:text-muted leading-relaxed font-light font-sans">
-                    Askthedocs lets you crawl into your documentation in real-time and get clear, accurate answers without hallucination.
+                    Askthedocs pulls directly from your documentation url in real time and gives answers you can trust without hallucination (RAG).
                   </p>
                 </div>
                 
