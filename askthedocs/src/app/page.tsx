@@ -1,103 +1,321 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import type React from "react";
+
+import { useState, useRef, useEffect } from "react";
+import {
+  Mic,
+  ArrowUp,
+  Settings,
+  Edit,
+  Search,
+  BookOpen,
+  Zap,
+  Users,
+  Menu,
+  X,
+} from "lucide-react";
+
+interface Message {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: Date;
+}
+
+export default function Chat() {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [inputValue, setInputValue] = useState("");
+  const [showGradient, setShowGradient] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const sidebarItems = [
+    { icon: Edit, label: "New chat" },
+    { icon: Search, label: "Search chats" },
+    { icon: BookOpen, label: "Library" },
+    { icon: Zap, label: "Sora" },
+    { icon: Users, label: "GPTs" },
+  ];
+
+  const chatHistory = [
+    "Testing message clarity",
+    "Email validation in Sequelize",
+    "Email validation in Sequelize",
+    "Reeru AI CV description",
+    "Log input in Codeforces",
+    "API optimization for YT app",
+    "Malcolm X transformation",
+    "Next.js MongoDB MERN comparison",
+    "Logo PNG dan SVG",
+    "Weekly usage limits explained",
+    "Convert Gemini to TS",
+    "ES6 axios update",
+  ];
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const handleSend = () => {
+    if (!inputValue.trim()) return;
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content: inputValue.trim(),
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setInputValue("");
+    setShowGradient(false);
+    setSidebarOpen(false);
+
+    // Simulate AI response
+    setTimeout(() => {
+      const aiMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content:
+          "Got it — I see your message loud and clear.\nWhat are we testing?",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, aiMessage]);
+    }, 1000);
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
+    <div className="flex h-screen bg-[#1A1A1A] text-white font-sans overflow-hidden w-full">
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 md:hidden"
+          onClick={() => setSidebarOpen(false)}
         />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+      )}
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+      <div
+        className={`
+        fixed md:relative z-50 md:z-auto
+        w-64 md:w-64 
+        bg-black/5 backdrop-blur-xl border-r border-white/10 flex flex-col
+        transform transition-transform duration-300 ease-in-out
+        ${sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}
+        h-full
+      `}
+      >
+        <div className="md:hidden absolute top-4 right-4 z-10">
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="p-2 text-gray-400 hover:text-white hover:bg-white/20 rounded-lg transition-all duration-200"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            <X className="w-5 h-5" />
+          </button>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
+
+        <div className="p-4 border-b border-white/10 bg-white/5 backdrop-blur-xl">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Settings className="w-5 h-5" />
+            </div>
+           
+          </div>
+        </div>
+
+        <div className="p-4 space-y-2">
+          {sidebarItems.map((item, index) => (
+            <div
+              key={index}
+              className="flex items-center gap-3 p-2 rounded-lg cursor-pointer text-gray-300"
+            >
+              <item.icon className="w-4 h-4" />
+              <span className="text-sm">{item.label}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex-1 p-4 overflow-hidden">
+          <div className="text-xs text-gray-400 mb-3">Chats</div>
+          <div className="space-y-1 overflow-y-auto h-full pr-2 hide-scrollbar">
+            {chatHistory.map((chat, index) => (
+              <div
+                key={index}
+                className={`text-sm p-2 rounded-lg cursor-pointer ${
+                  index === 1
+                    ? "bg-white/15 backdrop-blur-lg text-white border border-white/20"
+                    : "text-gray-400"
+                }`}
+              >
+                {chat}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-4 border-t border-white/10 bg-white/5 backdrop-blur-xl">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center text-sm font-medium">
+              M
+            </div>
+            <div>
+              <div className="text-sm font-medium">gakpo.ihsan</div>
+              <div className="text-xs text-gray-400">Free</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col relative overflow-hidden">
+        {/* Gradient Background */}
+        {showGradient && (
+          <div
+            className="absolute inset-0 gradient-bg fade-gradient"
+            style={{
+              opacity: showGradient ? 1 : 0,
+              transition: "opacity 0.8s ease-in-out",
+            }}
           />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+        )}
+
+        <div className="relative z-10 p-3 md:p-4 border-b border-white/20 bg-black/10 backdrop-blur-lg flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="md:hidden p-2 text-gray-400 hover:text-white hover:bg-white/20 rounded-lg transition-all duration-200 mr-2"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <span className="font-normal font-sans text-sm md:text-base">
+              Askthedocs
+            </span>
+          </div>
+          <div className="flex items-center gap-2 md:gap-4">
+          
+            <button className="text-xs bg-blue-600/80 backdrop-blur-sm hover:bg-blue-600 px-2 md:px-3 py-1 rounded transition-all duration-200 border border-blue-500/30">
+              Get Plus
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 relative z-10 overflow-y-auto hide-scrollbar">
+          {messages.length === 0 ? (
+            /* Mobile responsive welcome screen */
+            <div className="h-full flex flex-col items-center justify-center px-4 md:px-8">
+              <div className="text-center max-w-2xl">
+                <h1 className="text-2xl md:text-4xl font-light mb-4 font-sans">
+                  AI That Actually Read the Docs
+                </h1>
+                <p className="text-gray-300 text-base md:text-lg leading-relaxed font-light italic font-sans">
+                  Askthedocs lets you crawl into your documentation in real-time and get clear, accurate answers without hallucination.
+                </p>
+              </div>
+            </div>
+          ) : (
+            /* Mobile responsive chat messages */
+            <div className="max-w-3xl mx-auto p-3 md:p-6 space-y-4 md:space-y-6">
+              {messages.map((message) => (
+                <div key={message.id} className="space-y-4">
+                  {message.role === "user" ? (
+                    <div className="flex justify-end">
+                      <div className="bg-white/20 backdrop-blur-lg border border-white/30 rounded-2xl px-3 md:px-4 py-2 max-w-xs md:max-w-sm">
+                        <p className="text-sm">{message.content}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="prose prose-invert max-w-none">
+                        <p className="text-gray-200 whitespace-pre-line text-sm md:text-base">
+                          {message.content}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 text-gray-400">
+                        <button className="p-1 hover:bg-white/20 hover:backdrop-blur-lg rounded border border-transparent hover:border-white/30 transition-all duration-200">
+                          <svg
+                            className="w-4 h-4"
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
+                          >
+                            <path d="M8 2a1 1 0 000 2h2a1 1 0 100-2H8z" />
+                            <path d="M3 5a2 2 0 012-2h1a3 3 0 003-3h2a3 3 0 003 3h1a2 2 0 012 2v6h-4.586l1.293-1.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L10.414 13H15v3a2 2 0 01-2 2H5a2 2 0 01-2-2V5z" />
+                          </svg>
+                        </button>
+                        <button className="p-1 hover:bg-white/20 hover:backdrop-blur-lg rounded border border-transparent hover:border-white/30 transition-all duration-200">
+                          <svg
+                            className="w-4 h-4"
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                        </button>
+                        <button className="p-1 hover:bg-white/20 hover:backdrop-blur-lg rounded border border-transparent hover:border-white/30 transition-all duration-200">
+                          <svg
+                            className="w-4 h-4"
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M5 2a1 1 0 011 1v1h1a1 1 0 010 2H6v1a1 1 0 11-2 0V6H3a1 1 0 010-2h1V3a1 1 0 011-1zm0 10a1 1 0 011 1v1h1a1 1 0 110 2H6v1a1 1 0 11-2 0v-1H3a1 1 0 110-2h1v-1a1 1 0 011-1zM12 2a1 1 0 01.967.744L14.146 7.2 17.5 9.134a1 1 0 010 1.732L14.146 12.8l-1.179 4.456a1 1 0 01-1.934 0L9.854 12.8 6.5 10.866a1 1 0 010-1.732L9.854 7.2l1.179-4.456A1 1 0 0112 2z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
+
+        <div className="relative z-10 p-3 md:p-6 flex-shrink-0">
+          <div className="max-w-3xl mx-auto">
+            <div className="relative bg-black/10 backdrop-blur-lg rounded-2xl border border-white/30 focus-within:border-white/40 transition-all duration-200">
+              <textarea
+                ref={inputRef}
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder="Ask anything"
+                className="w-full bg-transparent text-white placeholder-gray-400 p-3 md:p-4 pr-16 md:pr-20 resize-none focus:outline-none min-h-[48px] md:min-h-[56px] max-h-32 text-sm md:text-base"
+                rows={1}
+              />
+              <div className="absolute right-2 md:right-3 bottom-2 md:bottom-3 flex items-center gap-1 md:gap-2">
+                <button className="p-1.5 md:p-2 text-gray-400 hover:text-white hover:bg-white/20 hover:backdrop-blur-lg rounded border border-transparent hover:border-white/30 transition-all duration-200">
+                  <Mic className="w-4 h-4 md:w-5 md:h-5" />
+                </button>
+                <button
+                  onClick={handleSend}
+                  disabled={!inputValue.trim()}
+                  className="p-1.5 md:p-2 bg-white/90 backdrop-blur-sm text-black rounded-lg hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 border border-white/30"
+                >
+                  <ArrowUp className="w-4 h-4 md:w-5 md:h-5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
