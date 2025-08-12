@@ -1,19 +1,15 @@
-import type React from "react";
-import { DM_Sans, Inter } from "next/font/google";
+import type { Metadata } from "next";
+import { Inter, DM_Sans } from "next/font/google";
 import "./globals.css";
+import { InputProvider } from "./providers/input-context";
 
-const dmSans = DM_Sans({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-dm-sans",
-  weight: ["100", "300", "400", "500", "600", "700"],
-});
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
+const dmSans = DM_Sans({ subsets: ["latin"], variable: "--font-dm-sans" });
 
-const inter = Inter({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-inter",
-});
+export const metadata: Metadata = {
+  title: "AskTheDocs",
+  description: "AI That Actually Reads the Docs",
+};
 
 export default function RootLayout({
   children,
@@ -21,11 +17,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html
-      lang="en"
-      className={`${dmSans.variable} ${inter.variable} antialiased`}
-    >
-      <body className="bg-[#1A1A1A]">{children}</body>
+    <html lang="en" className="dark">
+      <body className={`${inter.variable} ${dmSans.variable} font-sans`}>
+      <InputProvider>
+        {children}
+      </InputProvider>
+      </body>
     </html>
   );
 }
