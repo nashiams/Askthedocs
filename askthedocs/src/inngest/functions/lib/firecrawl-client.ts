@@ -1,4 +1,4 @@
-// inngest/functions/lib/firecrawl-client.ts
+// firecrawl-client.ts - Updated to work with semantic extraction
 
 interface ApiKey {
   key: string;
@@ -26,7 +26,7 @@ class FirecrawlClient {
     { key: process.env.FIRECRAWL_KEY_1 || '', isExhausted: false, usage: 0 },
     { key: process.env.FIRECRAWL_KEY_2 || '', isExhausted: false, usage: 0 },
     { key: process.env.FIRECRAWL_KEY_3 || '', isExhausted: false, usage: 0 },
-  ].filter(k => k.key); // Remove empty keys
+  ].filter(k => k.key);
   
   private currentKeyIndex = 0;
 
@@ -38,7 +38,6 @@ class FirecrawlClient {
       return null;
     }
     
-    // Round-robin through available keys
     const keyIndex = this.currentKeyIndex % availableKeys.length;
     const selectedKey = availableKeys[keyIndex];
     this.currentKeyIndex++;
@@ -54,12 +53,11 @@ class FirecrawlClient {
     }
   }
 
-  async scrapePage(url: string): Promise<{ content: string; method: 'firecrawl' | 'manual' } | null> {
+  async scrapePage(url: string): Promise<{ content: string; method: 'firecrawl' | 'manual'; contentType: 'markdown' | 'html' } | null> {
     // Try Firecrawl first
     const apiKey = this.getNextApiKey();
     
     if (!apiKey) {
-      // All keys exhausted, use manual fetch
       console.log(`Using manual fetch for ${url} (all API keys exhausted)`);
       return this.manualFetch(url);
     }
@@ -76,20 +74,22 @@ class FirecrawlClient {
         body: JSON.stringify({
           url,
           formats: ['markdown', 'html'],
+          // Add extraction options for better semantic content
+          extractorOptions: {
+            mode: 'markdown',
+            includeRawHtml: false,
+          },
         }),
       });
 
       if (response.status === 429) {
-        // Rate limit hit
         console.log(`Rate limit hit for API key ${this.apiKeys.indexOf(apiKey) + 1}`);
         this.markKeyExhausted(apiKey.key);
-        // Try again with next key
         return this.scrapePage(url);
       }
 
       if (!response.ok) {
         console.error(`Firecrawl error for ${url}: ${response.status}`);
-        // Try with next key or fallback
         return this.scrapePage(url);
       }
 
@@ -102,22 +102,45 @@ class FirecrawlClient {
 
       apiKey.usage++;
       
-      // Prefer markdown, fallback to HTML
-      const content = data.data.markdown || data.data.html || data.data.content || '';
+      // Prefer markdown for better semantic extraction
+      if (data.data.markdown && data.data.markdown.trim().length > 0) {
+        return { 
+          content: data.data.markdown, 
+          method: 'firecrawl',
+          contentType: 'markdown'
+        };
+      }
       
-      return { content, method: 'firecrawl' };
+      // Fallback to HTML if markdown is empty/bad
+      const htmlContent = data.data.html || data.data.content || '';
+      if (htmlContent.trim().length > 0) {
+        return { 
+          content: htmlContent, 
+          method: 'firecrawl',
+          contentType: 'html'
+        };
+      }
+      
+      // If both are empty, try manual fetch
+      console.warn(`Firecrawl returned empty content for ${url}, trying manual fetch`);
+      return this.manualFetch(url);
       
     } catch (error) {
       console.error(`Firecrawl request failed for ${url}:`, error);
-      // Fallback to manual fetch
       return this.manualFetch(url);
     }
   }
 
-  private async manualFetch(url: string): Promise<{ content: string; method: 'manual' } | null> {
+  private async manualFetch(url: string): Promise<{ content: string; method: 'manual'; contentType: 'html' } | null> {
     try {
       console.log(`Manual fetch for ${url}`);
-      const response = await fetch(url);
+      
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; DocumentationCrawler/1.0)',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+      });
       
       if (!response.ok) {
         console.error(`Manual fetch failed for ${url}: ${response.status}`);
@@ -125,7 +148,17 @@ class FirecrawlClient {
       }
       
       const content = await response.text();
-      return { content, method: 'manual' };
+      
+      if (content.trim().length === 0) {
+        console.warn(`Manual fetch returned empty content for ${url}`);
+        return null;
+      }
+      
+      return { 
+        content, 
+        method: 'manual',
+        contentType: 'html'
+      };
       
     } catch (error) {
       console.error(`Manual fetch error for ${url}:`, error);
@@ -137,6 +170,7 @@ class FirecrawlClient {
     return {
       totalKeys: this.apiKeys.length,
       exhaustedKeys: this.apiKeys.filter(k => k.isExhausted).length,
+      availableKeys: this.apiKeys.filter(k => !k.isExhausted).length,
       usage: this.apiKeys.map((k, i) => ({
         key: `Key ${i + 1}`,
         usage: k.usage,
