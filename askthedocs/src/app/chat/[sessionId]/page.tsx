@@ -21,6 +21,7 @@ interface Message {
   comparisons?: string[];
   timestamp: Date;
   type?: "answer" | "comparison";
+  isStreaming?: boolean;
 }
 
 interface AttachedDoc {
@@ -50,13 +51,31 @@ export default function ChatSessionPage() {
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const streamingMessageRef = useRef<string>("");
+  const ablyRef = useRef<Ably.Realtime | null>(null); // Added ablyRef
 
-  // Load session data on mount
+  // Load session data and user info on mount
   useEffect(() => {
     loadSessionData();
-    initializeAbly();
     getUserInfo();
   }, [sessionId]);
+
+  // Initialize Ably ONLY after userInfo is loaded
+  useEffect(() => {
+    if (userInfo?.email) {
+      initializeAbly(userInfo.email);
+    }
+  }, [userInfo]);
+
+  // Modified line 64-71: Fix Ably cleanup to use ref and empty dependency array
+  useEffect(() => {
+    return () => {
+      // Only cleanup if component unmounts, not on every render
+      if (ablyRef.current) {
+        ablyRef.current.close();
+        ablyRef.current = null;
+      }
+    };
+  }, []); // Empty dependency array - only on unmount
 
   const loadSessionData = async () => {
     try {
@@ -96,7 +115,13 @@ export default function ChatSessionPage() {
     }
   };
 
-  const initializeAbly = async () => {
+  const initializeAbly = async (userEmail: string) => {
+    // Guard clause to ensure we have email
+    if (!userEmail) {
+      console.error("Cannot initialize Ably without user email");
+      return;
+    }
+
     try {
       const tokenResponse = await fetch("/api/docs/ably-token");
       const tokenRequest = await tokenResponse.json();
@@ -108,11 +133,23 @@ export default function ChatSessionPage() {
       });
       
       setAblyClient(ably);
+      ablyRef.current = ably; // Modified line 123: Store in ref as well
       
-      // Subscribe to crawl updates
-      const channel = ably.channels.get(`crawl-${userInfo?.email}`);
+      // Subscribe to crawl updates with the correct channel name
+      const channel = ably.channels.get(`crawl-${userEmail}`);
+      
       channel.subscribe("progress", (message) => {
         handleCrawlProgress(message.data);
+      });
+
+      // Log successful connection
+      ably.connection.on('connected', () => {
+        console.log(`Ably connected for channel: crawl-${userEmail}`);
+      });
+
+      // Handle connection errors
+      ably.connection.on('failed', (error) => {
+        console.error('Ably connection failed:', error);
       });
     } catch (error) {
       console.error("Failed to initialize Ably:", error);
@@ -184,7 +221,8 @@ export default function ChatSessionPage() {
         role: "assistant",
         content: "",
         timestamp: new Date(),
-        type: "answer"
+        type: "answer",
+        isStreaming: true
       };
       
       setMessages(prev => [...prev, assistantMessage]);
@@ -225,6 +263,12 @@ export default function ChatSessionPage() {
           }
         }
       }
+      
+      setMessages(prev => {
+        const newMessages = [...prev];
+        newMessages[newMessages.length - 1].isStreaming = false;
+        return newMessages;
+      });
     } catch (error) {
       setToast({
         message: "Failed to send message",
@@ -233,6 +277,13 @@ export default function ChatSessionPage() {
       });
     } finally {
       setIsStreaming(false);
+      setMessages(prev => {
+        const newMessages = [...prev];
+        if (newMessages.length > 0 && newMessages[newMessages.length - 1].role === 'assistant') {
+          newMessages[newMessages.length - 1].isStreaming = false;
+        }
+        return newMessages;
+      });
     }
   };
 

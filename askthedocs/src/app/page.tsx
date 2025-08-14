@@ -1,15 +1,22 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { BookOpen, Menu } from "lucide-react";
-
 import { useInput } from "@/app/providers/input-context";
-import { checkAuthCookie } from "@/lib/auth/check-auth";
+import { checkAuth } from "@/lib/auth/check-auth";
+import Ably from "ably";
 import { DocInput } from "./components/chat/doc-input";
 import { AuthModal } from "./components/auth/auth-modal";
 import { Toast } from "./components/ui/toast";
 import { Sidebar } from "./components/layout/sidebar";
+import { CrawlProgressModal } from "./components/ui/crawl-progress-modal";
+
+type ToastState = {
+  message?: string;
+  type?: "error" | "info" | "success";
+  visible: boolean;
+};
 
 export default function HomePage() {
   const router = useRouter();
@@ -19,67 +26,129 @@ export default function HomePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userInfo, setUserInfo] = useState<{ name?: string; email?: string; image?: string } | null>(null);
+  const [userInfo, setUserInfo] = useState<any>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
-  const [toast, setToast] = useState<{
+  const [crawlStatus, setCrawlStatus] = useState<{
+    isVisible: boolean;
+    status: "idle" | "crawling" | "complete" | "error";
+    progress: number;
     message: string;
-    type: "success" | "error" | "info";
-    visible: boolean;
-  }>({ message: "", type: "info", visible: false });
+    url?: string;
+    sessionId?: string;
+  }>({
+    isVisible: false,
+    status: "idle",
+    progress: 0,
+    message: ""
+  });
+  const [isCrawling, setIsCrawling] = useState(false);
+  const [toast, setToast] = useState<ToastState>({ visible: false });
+  const ablyRef = useRef<Ably.Realtime | null>(null);
 
-  // Check auth on mount with detailed debugging
   useEffect(() => {
-    const checkAuth = async () => {
-      console.log("🔍 Starting auth check...");
-      setIsCheckingAuth(true);
-      
-      // Step 1: Check cookies on client side
-      const hasCookie = checkAuthCookie();
-      console.log("Step 1 - Cookie check result:", hasCookie);
-      
-      // Step 2: Check with debug endpoint
-      try {
-        const debugResponse = await fetch("/api/auth/check");
-        const debugData = await debugResponse.json();
-        console.log("Step 2 - Debug endpoint response:", debugData);
-      } catch (error) {
-        console.error("Debug endpoint error:", error);
-      }
-      
-      // Step 3: Check session endpoint
-      try {
-        const sessionResponse = await fetch("/api/auth/session");
-        const sessionData = await sessionResponse.json();
-        console.log("Step 3 - Session data:", sessionData);
-        
-        if (sessionData?.user) {
-          console.log("✅ User is authenticated:", sessionData.user);
-          setIsAuthenticated(true);
-          setUserInfo(sessionData.user);
-        } else {
-          console.log("❌ No user in session data");
-          setIsAuthenticated(false);
-        }
-      } catch (error) {
-        console.error("❌ Session check failed:", error);
-        setIsAuthenticated(false);
-      }
-      
-      setIsCheckingAuth(false);
-      console.log("🏁 Auth check complete. Authenticated:", isAuthenticated);
-    };
-
-    checkAuth();
+    checkAuthStatus();
   }, []);
 
-  // Debug: Log state changes
+  // Initialize Ably only after we have userInfo
   useEffect(() => {
-    console.log("📊 State updated:", {
-      isAuthenticated,
-      isCheckingAuth,
-      userInfo
-    });
-  }, [isAuthenticated, isCheckingAuth, userInfo]);
+    if (userInfo?.email && !ablyRef.current) {
+      initializeAbly(userInfo.email);
+    }
+  }, [userInfo]);
+
+  const checkAuthStatus = async () => {
+    setIsCheckingAuth(true);
+    
+    try {
+      const isLoggedIn = await checkAuth();
+      
+      if (isLoggedIn) {
+        const response = await fetch("/api/auth/session");
+        const data = await response.json();
+        
+        if (data?.user) {
+          setIsAuthenticated(true);
+          setUserInfo(data.user);
+          // Don't initialize Ably here - wait for useEffect
+        } else {
+          setIsAuthenticated(false);
+        }
+      } else {
+        setIsAuthenticated(false);
+      }
+    } catch (error) {
+      console.error("Auth check failed:", error);
+      setIsAuthenticated(false);
+    }
+    
+    setIsCheckingAuth(false);
+  };
+
+  const initializeAbly = async (userEmail: string) => {
+    if (!userEmail || ablyRef.current) return;
+    
+    try {
+      console.log("Initializing Ably for:", userEmail);
+      
+      const tokenResponse = await fetch("/api/docs/ably-token");
+      const tokenRequest = await tokenResponse.json();
+      
+      const ably = new Ably.Realtime({
+        authCallback: (params, callback) => {
+          callback(null, tokenRequest);
+        }
+      });
+      
+      ablyRef.current = ably;
+      const channel = ably.channels.get(`crawl-${userEmail}`);
+      
+      // Modified section: Update Ably handler to navigate when complete (lines 91-123)
+      channel.subscribe("progress", (message) => {
+        const data = message.data;
+        console.log("Ably progress update:", data);
+        
+        if (data.status === "crawling" || data.status === "embedding") {
+          setCrawlStatus(prev => ({
+            ...prev,
+            status: "crawling",
+            progress: data.percentage || prev.progress,
+            message: data.message || "Processing documentation..."
+          }));
+        } else if (data.status === "complete" && data.sessionId) {
+          setCrawlStatus(prev => ({
+            ...prev,
+            status: "complete",
+            progress: 100,
+            message: "Documentation ready!"
+          }));
+          setIsCrawling(false);
+          
+          // Navigate to chat
+          setTimeout(() => {
+            router.push(`/chat/${data.sessionId}`);
+          }, 1000);
+        } else if (data.status === "error") {
+          setCrawlStatus(prev => ({
+            ...prev,
+            status: "error",
+            message: data.message || "Failed to index documentation"
+          }));
+          setIsCrawling(false);
+        }
+      });
+      
+      ably.connection.on('connected', () => {
+        console.log('Ably connected successfully');
+      });
+      
+      ably.connection.on('failed', (error) => {
+        console.error('Ably connection failed:', error);
+      });
+      
+    } catch (error) {
+      console.error("Failed to initialize Ably:", error);
+    }
+  };
 
   const isValidUrl = (url: string) => {
     try {
@@ -91,10 +160,7 @@ export default function HomePage() {
   };
 
   const handleSubmit = async () => {
-    console.log("📤 Submitting with auth state:", isAuthenticated);
-    
     if (!isAuthenticated) {
-      console.log("❌ Not authenticated, showing modal");
       setShowAuthModal(true);
       return;
     }
@@ -108,66 +174,80 @@ export default function HomePage() {
       return;
     }
 
+    if (isCrawling) {
+      setToast({
+        message: "Already indexing documentation. Please wait...",
+        type: "info",
+        visible: true,
+      });
+      return;
+    }
+
     setIsSubmitting(true);
+    setIsCrawling(true);
     
     try {
+      // REPLACED SECTION: First create session (lines 170-177)
       const sessionRes = await fetch("/api/chat/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include", // Ensure cookies are sent
         body: JSON.stringify({ indexedDocs: [] }),
       });
-
-      console.log("Session creation response:", sessionRes.status);
-
-      if (!sessionRes.ok) {
-        if (sessionRes.status === 401) {
-          console.log("❌ 401 response, showing auth modal");
-          setShowAuthModal(true);
-          setIsSubmitting(false);
-          return;
-        }
-        throw new Error("Failed to create session");
-      }
       
       const { sessionId } = await sessionRes.json();
-      console.log("✅ Session created:", sessionId);
-
+      
+      // REPLACED SECTION: Then check if doc exists/start crawling with sessionId (lines 179-187)
       const crawlRes = await fetch("/api/docs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ url: inputValue }),
+        body: JSON.stringify({ 
+          url: inputValue,
+          sessionId // Pass sessionId
+        }),
       });
 
-      if (!crawlRes.ok) {
-        const error = await crawlRes.json();
-        throw new Error(error.error || "Failed to start crawling");
+      const crawlData = await crawlRes.json();
+      
+      // REPLACED SECTION: Handle response based on crawlData status (lines 191-209)
+      if (crawlData.status === "ready" || crawlData.fromCache) {
+        // Already indexed, navigate immediately
+        clearInput();
+        router.push(`/chat/${sessionId}`);
+      } else {
+        // Show progress modal
+        setCrawlStatus({
+          isVisible: true,
+          status: "crawling",
+          progress: 0,
+          message: "Starting to index documentation...",
+          url: inputValue,
+          sessionId
+        });
+        clearInput();
       }
-
-      await fetch(`/api/chat/sessions/${sessionId}/attach`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ docUrl: inputValue }),
-      });
-
-      clearInput();
-      setShowGradient(false);
-      router.push(`/chat/${sessionId}`);
       
     } catch (error) {
-      console.error("❌ Submit error:", error);
       setToast({
         message: error instanceof Error ? error.message : "Failed to process documentation URL",
         type: "error",
         visible: true,
       });
+      setIsCrawling(false);
+    } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Show loading state while checking auth
+  // Cleanup Ably on unmount
+  useEffect(() => {
+    return () => {
+      if (ablyRef.current) {
+        ablyRef.current.close();
+        ablyRef.current = null;
+      }
+    };
+  }, []);
+
   if (isCheckingAuth) {
     return (
       <div className="w-full h-screen flex items-center justify-center bg-black">
@@ -176,9 +256,7 @@ export default function HomePage() {
     );
   }
 
-  // LOGGED OUT VIEW
   if (!isAuthenticated) {
-    console.log("🎨 Rendering LOGGED OUT view");
     return (
       <div className="relative w-full h-screen overflow-hidden">
         <div className="absolute inset-0 gradient-bg fade-gradient" style={{ zIndex: 0 }} />
@@ -227,13 +305,13 @@ export default function HomePage() {
           onClose={() => {
             setShowAuthModal(false);
             setTimeout(() => {
-              window.location.reload();
+              checkAuthStatus(); // Re-check auth instead of reload
             }, 500);
           }} 
         />
 
         <Toast
-          message={toast.message}
+          message={toast.message ?? ""}
           type={toast.type}
           isVisible={toast.visible}
           onClose={() => setToast(prev => ({ ...prev, visible: false }))}
@@ -242,8 +320,7 @@ export default function HomePage() {
     );
   }
 
-  // LOGGED IN VIEW
-  console.log("🎨 Rendering LOGGED IN view with user:", userInfo);
+  // Logged in view
   return (
     <div className="relative w-full h-screen overflow-hidden">
       {showGradient && (
@@ -297,10 +374,12 @@ export default function HomePage() {
             <div className="w-full max-w-3xl">
               <DocInput 
                 onSubmit={handleSubmit}
-                disabled={isSubmitting}
+                disabled={isSubmitting || isCrawling}
                 placeholder={
-                  isSubmitting 
-                    ? "Creating your session..." 
+                  isCrawling 
+                    ? "Indexing documentation..." 
+                    : isSubmitting
+                    ? "Processing..." 
                     : "Insert the Docs link (e.g. https://sequelize.org/docs/v7)"
                 }
               />
@@ -309,11 +388,21 @@ export default function HomePage() {
         </div>
       </div>
 
+      <CrawlProgressModal 
+        isVisible={crawlStatus.isVisible}
+        onClose={() => setCrawlStatus(prev => ({ ...prev, isVisible: false }))}
+        url={crawlStatus.url}
+        sessionId={crawlStatus.sessionId}
+        status={crawlStatus.status}
+        progress={crawlStatus.progress}
+        message={crawlStatus.message}
+      />
+
       <Toast
-        message={toast.message}
+        message={toast.message ?? ""}
         type={toast.type}
         isVisible={toast.visible}
-        onClose={() => setToast(prev => ({ ...prev, visible: false }))}
+        onClose={() => setToast({ ...toast, visible: false })}
       />
     </div>
   );

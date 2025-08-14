@@ -59,3 +59,14 @@ export interface IndexedDoc {
   snippetsCount: number;
   indexedAt: Date;
 }
+
+export interface IndexedUrl {
+  _id: ObjectId;
+  url: string;
+  docName: string;
+  indexedAt: Date;
+  indexedBy: string; // First user who indexed it
+  snippetsCount: number;
+  status: 'complete' | 'indexing' | 'failed';
+  jobId?: string;
+}

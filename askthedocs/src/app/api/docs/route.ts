@@ -6,6 +6,8 @@ import { nanoid } from "nanoid";
 import Ably from "ably";
 import { z } from "zod";
 import { redis } from "@/lib/cache/redis";
+import { getDatabase } from "@/lib/db/mongodb"; // Added import
+import { ObjectId } from "mongodb"; // Added import
 
 const ably = new Ably.Rest(process.env.ABLY_API_KEY!);
 
@@ -126,7 +128,7 @@ export async function POST(req: NextRequest) {
     }
 
     const channel = ably.channels.get(`crawl-${userEmail}`);
-    const { url } = await req.json();
+    const { url, sessionId } = await req.json(); // Modified line 119: Accept sessionId
 
     // Step 1: Zod validation (instant)
     const validation = docUrlSchema.safeParse(url);
@@ -137,22 +139,49 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Check if already indexed (do this before Google check to save API calls)
-    const existing = await qdrant.scroll({
-      collection_name: "code_snippets",
-      limit: 100,
-      with_payload: ["baseUrl"],
+    // Check MongoDB first for faster deduplication - REPLACED SECTION (lines 129-140)
+    const db = await getDatabase();
+    const indexedUrls = db.collection("indexed_urls");
+    
+    const existingDoc = await indexedUrls.findOne({ 
+      url, 
+      status: 'complete' 
     });
-
-    const alreadyIndexed = existing.points?.some(
-      (point) => point.payload?.baseUrl === url
-    );
-
-    if (alreadyIndexed) {
+    
+    if (existingDoc) {
+      console.log("URL already indexed by another user, skipping crawl");
+      
+      // If sessionId provided, attach to session immediately
+      if (sessionId) {
+        const sessions = db.collection("sessions");
+        await sessions.updateOne(
+          { _id: new ObjectId(sessionId) },
+          { 
+            $addToSet: { indexedDocs: url },
+            $set: { updatedAt: new Date() }
+          }
+        );
+      }
+      
       return NextResponse.json({
         message: "Documentation already indexed",
         status: "ready",
         baseUrl: url,
+        fromCache: true // Added fromCache flag
+      });
+    }
+
+    // Check if currently being indexed - NEW SECTION (lines 155-164)
+    const indexingDoc = await indexedUrls.findOne({ 
+      url, 
+      status: 'indexing' 
+    });
+    
+    if (indexingDoc) {
+      return NextResponse.json({
+        message: "Documentation is currently being indexed by another user",
+        status: "indexing",
+        jobId: indexingDoc.jobId
       });
     }
 
@@ -168,13 +197,25 @@ export async function POST(req: NextRequest) {
     // Generate job ID
     const jobId = `job_${nanoid()}`;
 
-    // Trigger Inngest background job
+    // Mark as indexing in MongoDB - NEW SECTION (lines 180-189)
+    await indexedUrls.insertOne({
+      url,
+      docName: new URL(url).hostname,
+      indexedAt: new Date(),
+      indexedBy: userEmail,
+      snippetsCount: 0,
+      status: 'indexing',
+      jobId
+    });
+
+    // Trigger Inngest background job - Modified line 192: Pass sessionId
     await inngest.send({
       name: "docs/crawl.requested",
       data: {
         url,
         userEmail,
         jobId,
+        sessionId // Pass sessionId to crawl function
       },
     });
 
