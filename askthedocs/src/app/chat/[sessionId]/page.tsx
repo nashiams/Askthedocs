@@ -330,14 +330,15 @@ export default function ChatSessionPage() {
     }
   };
 
-  const handleCompare = async (technology: string) => {
+ const handleCompare = async (technology: string) => {
     setShowComparisons(false);
     setIsStreaming(true);
+    streamingMessageRef.current = "";
     
     const lastUserMessage = messages.filter(m => m.role === "user").pop();
     
     try {
-      const response = await fetch(`/api/chat/sessions/${sessionId}/compare`, {
+      const response = await fetch(`/api/chat/sessions/${sessionId}/ask/compare`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -348,17 +349,59 @@ export default function ChatSessionPage() {
       
       if (!response.ok) throw new Error("Failed to compare");
       
-      const data = await response.json();
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
       
       const comparisonMessage: Message = {
         id: Date.now().toString(),
         role: "assistant",
-        content: data.comparison,
+        content: "",
         timestamp: new Date(),
-        type: "comparison"
+        type: "comparison",
+        isStreaming: true
       };
       
       setMessages(prev => [...prev, comparisonMessage]);
+      
+      while (reader) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              
+              if (data.type === 'chunk') {
+                streamingMessageRef.current += data.content;
+                setMessages(prev => {
+                  const newMessages = [...prev];
+                  newMessages[newMessages.length - 1].content = streamingMessageRef.current;
+                  return newMessages;
+                });
+              } else if (data.type === 'metadata') {
+                setMessages(prev => {
+                  const newMessages = [...prev];
+                  newMessages[newMessages.length - 1].snippets = data.snippets;
+                  newMessages[newMessages.length - 1].sources = data.sources;
+                  return newMessages;
+                });
+              }
+            } catch (e) {
+              console.error("Failed to parse SSE data:", e);
+            }
+          }
+        }
+      }
+      
+      setMessages(prev => {
+        const newMessages = [...prev];
+        newMessages[newMessages.length - 1].isStreaming = false;
+        return newMessages;
+      });
     } catch (error) {
       setToast({
         message: "Failed to generate comparison",
@@ -367,6 +410,13 @@ export default function ChatSessionPage() {
       });
     } finally {
       setIsStreaming(false);
+      setMessages(prev => {
+        const newMessages = [...prev];
+        if (newMessages.length > 0 && newMessages[newMessages.length - 1].role === 'assistant') {
+          newMessages[newMessages.length - 1].isStreaming = false;
+        }
+        return newMessages;
+      });
     }
   };
 

@@ -1,9 +1,16 @@
-// lib/vector/qdrant.ts (revised with proper types)
-import { SnippetPayload, SnippetSearchResult } from "@/types/snippet";
+// lib/vector/qdrant.ts
+import { ExtractedSnippet, SnippetSearchResult } from "@/types/snippet";
 import { QdrantClient } from "@qdrant/js-client-rest";
 
 const COLLECTION_NAME = "code_snippets";
 const VECTOR_SIZE = 1536; // OpenAI embedding size
+
+// Define the payload stored in Qdrant
+export interface SnippetPayload extends ExtractedSnippet {
+  tokens: number;
+  indexedAt: string;
+  indexedBy?: string;
+}
 
 class QdrantService {
   private client: QdrantClient;
@@ -14,6 +21,7 @@ class QdrantService {
       apiKey: process.env.QDRANT_API_KEY,
     });
   }
+
   async scroll(params: {
     collection_name: string;
     scroll_filter?: any;
@@ -92,10 +100,32 @@ class QdrantService {
         with_payload: true,
       });
 
-      return results.map((result) => ({
-        score: result.score,
-        ...(result.payload as unknown as SnippetPayload),
-      }));
+      return results.map((result) => {
+        const payload = result.payload as unknown as SnippetPayload;
+        return {
+          score: result.score,
+          // All fields from ExtractedSnippet
+          content: payload.content,
+          type: payload.type,
+          heading: payload.heading,
+          parentHeading: payload.parentHeading,
+          level: payload.level,
+          codeSnippet: payload.codeSnippet,
+          sourceUrl: payload.sourceUrl,
+          baseUrl: payload.baseUrl,
+          position: payload.position,
+          docName: payload.docName,
+          // Additional fields from SnippetPayload
+          tokens: payload.tokens,
+          indexedAt: payload.indexedAt,
+          indexedBy: payload.indexedBy,
+          // Legacy fields for backward compatibility
+          language: payload.language,
+          code: payload.codeSnippet || '', // Map codeSnippet to code for legacy
+          purpose: payload.heading, // Map heading to purpose for legacy
+          section: payload.heading,
+        };
+      });
     } catch (error) {
       console.error("Search failed:", error);
       throw error;

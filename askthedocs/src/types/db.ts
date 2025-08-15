@@ -48,7 +48,10 @@ export interface Message {
   query?: string;
   sources?: string[];
   tokensUsed?: number;
+  suggestedQuery?: string; // Add this field
   timestamp: Date;
+  searchedDocs?: string[];
+  docCoverage?: { [k: string]: number }
 }
 
 export interface IndexedDoc {
@@ -70,3 +73,4 @@ export interface IndexedUrl {
   status: 'complete' | 'indexing' | 'failed';
   jobId?: string;
 }
+

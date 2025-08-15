@@ -1,5 +1,3 @@
-// Updated section of crawl-documentation.ts
-
 import { inngest } from "../client";
 import { updateIndexedDocStatus } from "@/lib/db/collections";
 import { embeddingService } from "@/lib/vector/embeddings";
@@ -9,10 +7,7 @@ import type { ExtractedSnippet } from "@/types/snippet";
 import Ably from "ably";
 import { discoverViaSitemap, discoverViaHtmlScraping } from "./lib/sitemap-discovery";
 import { firecrawlClient } from "./lib/firecrawl-client";
-import { 
-  extractCodeFromHtml, 
-  extractCodeFromMarkdown 
-} from "./lib/manual-crawler";
+import {  extractSectionsFromMarkdown } from "./lib/manual-crawler";
 
 const ably = new Ably.Rest(process.env.ABLY_API_KEY!);
 
@@ -28,10 +23,11 @@ export const crawlDocumentation = inngest.createFunction(
     const channel = ably.channels.get(`crawl-${userEmail}`);
 
     try {
-      // Step 1: Discover pages via sitemap (unchanged)
+      // Step 1: Discover pages via sitemap
       const pages = await step.run("discover-pages", async () => {
         console.log(`Starting crawl for ${url}`);
         
+        // Try sitemap first
         let foundPages = await discoverViaSitemap(url);
         
         if (foundPages.length === 0) {
@@ -39,6 +35,7 @@ export const crawlDocumentation = inngest.createFunction(
           foundPages = await discoverViaHtmlScraping(url);
         }
         
+        // Limit to 50 pages for MVP
         foundPages = foundPages.slice(0, 50);
         
         console.log(`Found ${foundPages.length} pages to process`);
@@ -57,18 +54,17 @@ export const crawlDocumentation = inngest.createFunction(
         throw new Error("No pages found to crawl");
       }
 
-      // Step 2: Extract content with SEMANTIC EXTRACTION
+      // Step 2: Extract content from each page using Firecrawl with rotation
       let allSnippets: ExtractedSnippet[] = [];
       let firecrawlCount = 0;
       let manualCount = 0;
-      let semanticExtractionCount = 0;
-      let fallbackExtractionCount = 0;
       
       for (let i = 0; i < pages.length; i++) {
         const pageUrl = pages[i];
         
         const snippets = await step.run(`extract-page-${i}`, async () => {
           try {
+            // Use Firecrawl client with automatic rotation and fallback
             const result = await firecrawlClient.scrapePage(pageUrl);
             
             if (!result) {
@@ -76,7 +72,7 @@ export const crawlDocumentation = inngest.createFunction(
               return [];
             }
             
-            // Track extraction methods
+            // Track which method was used
             if (result.method === 'firecrawl') {
               firecrawlCount++;
             } else {
@@ -85,29 +81,21 @@ export const crawlDocumentation = inngest.createFunction(
             
             let pageSnippets: ExtractedSnippet[] = [];
             
-            // IMPROVED: Use semantic extraction based on content type
-            if (result.contentType === 'markdown') {
-              console.log(`Using semantic markdown extraction for ${pageUrl}`);
-              
-              // Use the correct function name
-              pageSnippets = extractCodeFromMarkdown(result.content, pageUrl, url);
-              semanticExtractionCount++;
-              
+            // Check if content is markdown (from Firecrawl)
+            if (result.content.includes('```') && result.method === 'firecrawl') {
+              // USE SECTION EXTRACTION for better context
+              pageSnippets = extractSectionsFromMarkdown(result.content, pageUrl, url);
             } else {
-              // HTML content
-              console.log(`Using semantic HTML extraction for ${pageUrl}`);
-              
-              // Use the correct function name
-              pageSnippets = extractCodeFromHtml(result.content, pageUrl, url);
-              semanticExtractionCount++;
+              // HTML content - existing logic
+              pageSnippets = extractSectionsFromMarkdown(result.content, pageUrl, url);
             }
             
-            // Update progress with more detailed info
+            // Update progress
             const progress = 10 + Math.round(((i + 1) / pages.length) * 60);
             await channel.publish("progress", {
               jobId,
               status: "crawling",
-              message: `Processed ${i + 1}/${pages.length} pages (${result.method}:${result.contentType}, ${pageSnippets.length} sections)`,
+              message: `Processed ${i + 1}/${pages.length} pages`,
               percentage: progress,
             });
             
@@ -121,28 +109,22 @@ export const crawlDocumentation = inngest.createFunction(
         allSnippets.push(...snippets);
       }
 
-      // Enhanced logging
-      console.log(`Extraction complete:`);
-      console.log(`- Firecrawl pages: ${firecrawlCount}`);
-      console.log(`- Manual pages: ${manualCount}`);
-      console.log(`- Semantic extractions: ${semanticExtractionCount}`);
-      console.log(`- Fallback extractions: ${fallbackExtractionCount}`);
+      // Log extraction stats
+      console.log(`Extraction complete - Firecrawl: ${firecrawlCount}, Manual: ${manualCount}`);
       console.log('API key usage:', firecrawlClient.getStats());
 
-      // Deduplicate snippets with improved logic
-      const originalCount = allSnippets.length;
+      // Deduplicate snippets
       allSnippets = deduplicateSnippets(allSnippets);
-      console.log(`Deduplication: ${originalCount} → ${allSnippets.length} snippets`);
 
-      // Step 3: Generate embeddings and store (enhanced with extraction stats)
+      // Step 3: Generate embeddings and store
       await step.run("store-embeddings", async () => {
         if (allSnippets.length === 0) {
-          console.warn("No content found, marking as complete anyway");
+          console.warn("No code snippets found, marking as complete anyway");
           
           await channel.publish("progress", {
             jobId,
             status: "complete",
-            message: "No documentation content found",
+            message: "No code examples found in documentation",
             percentage: 100,
             sessionId,
             stats: {
@@ -151,20 +133,18 @@ export const crawlDocumentation = inngest.createFunction(
               baseUrl: url,
               firecrawlPages: firecrawlCount,
               manualPages: manualCount,
-              semanticExtractions: semanticExtractionCount,
-              fallbackExtractions: fallbackExtractionCount,
             },
           });
           
           return;
         }
 
-        console.log(`Storing ${allSnippets.length} semantic snippets`);
+        console.log(`Storing ${allSnippets.length} snippets`);
 
         await channel.publish("progress", {
           jobId,
           status: "embedding",
-          message: `Creating embeddings for ${allSnippets.length} content sections...`,
+          message: `Creating embeddings for ${allSnippets.length} snippets...`,
           percentage: 85,
         });
 
@@ -173,14 +153,14 @@ export const crawlDocumentation = inngest.createFunction(
           ...s,
           baseUrl: url,
           indexedBy: userEmail,
-          extractionMethod: semanticExtractionCount > fallbackExtractionCount ? 'semantic' : 'mixed',
         }));
 
         await embeddingService.embedAndStoreSnippets(snippetsWithMetadata);
 
-        // Update MongoDB with enhanced stats
+        // Update MongoDB
         const db = await getDatabase();
         
+        // Update indexed_urls collection
         await db.collection("indexed_urls").updateOne(
           { jobId },
           { 
@@ -190,15 +170,12 @@ export const crawlDocumentation = inngest.createFunction(
               crawlMethod: manualCount > 0 ? 'mixed' : 'firecrawl',
               firecrawlPages: firecrawlCount,
               manualPages: manualCount,
-              semanticExtractions: semanticExtractionCount,
-              fallbackExtractions: fallbackExtractionCount,
-              extractionQuality: semanticExtractionCount > fallbackExtractionCount ? 'high' : 'medium',
             }
           },
           { upsert: true }
         );
 
-        // Attach to session
+        // Attach to session if provided
         if (sessionId) {
           await db.collection("sessions").updateOne(
             { _id: new ObjectId(sessionId) },
@@ -212,7 +189,7 @@ export const crawlDocumentation = inngest.createFunction(
         await channel.publish("progress", {
           jobId,
           status: "complete",
-          message: `Successfully indexed ${allSnippets.length} content sections with ${semanticExtractionCount > fallbackExtractionCount ? 'high' : 'medium'} quality extraction!`,
+          message: `Successfully indexed ${allSnippets.length} code examples!`,
           percentage: 100,
           sessionId,
           stats: {
@@ -221,14 +198,11 @@ export const crawlDocumentation = inngest.createFunction(
             baseUrl: url,
             firecrawlPages: firecrawlCount,
             manualPages: manualCount,
-            semanticExtractions: semanticExtractionCount,
-            fallbackExtractions: fallbackExtractionCount,
-            extractionQuality: semanticExtractionCount > fallbackExtractionCount ? 'high' : 'medium',
           },
         });
 
-        console.log(`Crawl complete: ${allSnippets.length} sections indexed`);
-        console.log(`Quality: ${semanticExtractionCount}/${semanticExtractionCount + fallbackExtractionCount} pages used semantic extraction`);
+        console.log(`Crawl complete: ${allSnippets.length} snippets indexed`);
+        console.log(`Methods used - Firecrawl: ${firecrawlCount}, Manual: ${manualCount}`);
       });
 
       return {
@@ -237,14 +211,12 @@ export const crawlDocumentation = inngest.createFunction(
         snippets: allSnippets.length,
         firecrawlPages: firecrawlCount,
         manualPages: manualCount,
-        semanticExtractions: semanticExtractionCount,
-        fallbackExtractions: fallbackExtractionCount,
       };
       
     } catch (error) {
       console.error("Crawl failed:", error);
       
-      // Update status to failed (unchanged)
+      // Update status to failed
       const db = await getDatabase();
       await db.collection("indexed_urls").updateOne(
         { jobId },
@@ -272,7 +244,7 @@ export const crawlDocumentation = inngest.createFunction(
   }
 );
 
-// Enhanced deduplication
+// Deduplicate snippets helper
 function deduplicateSnippets(snippets: ExtractedSnippet[]): ExtractedSnippet[] {
   const MAX_SNIPPETS = 500;
   
@@ -283,43 +255,19 @@ function deduplicateSnippets(snippets: ExtractedSnippet[]): ExtractedSnippet[] {
   console.log(`Deduplicating ${snippets.length} snippets...`);
   
   const uniqueSnippets: ExtractedSnippet[] = [];
-  const seenContent = new Set<string>();
+  const seenCodes = new Set<string>();
   
-  // Sort by importance (semantic extractions first, then by content length)
-  const sortedSnippets = snippets.sort((a, b) => {
-    // Prefer longer content (more context)
-    if (a.code.length !== b.code.length) {
-      return b.code.length - a.code.length;
-    }
-    // Prefer certain section types
-    const importantSections = ['Installation', 'Getting Started', 'API Reference', 'Guide'];
-    const aImportant = importantSections.includes(a.section);
-    const bImportant = importantSections.includes(b.section);
-    
-    if (aImportant !== bImportant) {
-      return bImportant ? 1 : -1;
-    }
-    
-    return 0;
-  });
-  
-  for (const snippet of sortedSnippets) {
-    // Create a more sophisticated deduplication key
-    const contentKey = snippet.code
-      .replace(/\s+/g, " ")
-      .substring(0, 200)
-      .toLowerCase();
-    
-    if (!seenContent.has(contentKey)) {
-      uniqueSnippets.push(snippet);
-      seenContent.add(contentKey);
-      
-      if (uniqueSnippets.length >= MAX_SNIPPETS) {
-        break;
+  for (const snippet of snippets) {
+    // Normalize code for comparison (remove whitespace)
+    if (typeof snippet.code === "string") {
+      const codeKey = snippet.code.replace(/\s+/g, "").substring(0, 100);
+      if (!seenCodes.has(codeKey)) {
+        uniqueSnippets.push(snippet);
+        seenCodes.add(codeKey);
       }
     }
   }
   
-  console.log(`After smart deduplication: ${uniqueSnippets.length} unique snippets`);
-  return uniqueSnippets;
+  console.log(`After deduplication: ${uniqueSnippets.length} unique snippets`);
+  return uniqueSnippets.slice(0, MAX_SNIPPETS);
 }
