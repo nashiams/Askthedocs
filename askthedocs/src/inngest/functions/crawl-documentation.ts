@@ -248,6 +248,7 @@ export const crawlDocumentation = inngest.createFunction(
 function deduplicateSnippets(snippets: ExtractedSnippet[]): ExtractedSnippet[] {
   const MAX_SNIPPETS = 500;
   
+  // If under limit, return as-is
   if (snippets.length <= MAX_SNIPPETS) {
     return snippets;
   }
@@ -255,19 +256,41 @@ function deduplicateSnippets(snippets: ExtractedSnippet[]): ExtractedSnippet[] {
   console.log(`Deduplicating ${snippets.length} snippets...`);
   
   const uniqueSnippets: ExtractedSnippet[] = [];
-  const seenCodes = new Set<string>();
+  const seenContent = new Set<string>();
   
   for (const snippet of snippets) {
-    // Normalize code for comparison (remove whitespace)
-    if (typeof snippet.code === "string") {
-      const codeKey = snippet.code.replace(/\s+/g, "").substring(0, 100);
-      if (!seenCodes.has(codeKey)) {
-        uniqueSnippets.push(snippet);
-        seenCodes.add(codeKey);
+    // Create a unique key from the snippet content
+    let uniqueKey = '';
+    
+    // Try different fields that might contain the unique content
+    if (snippet.code && typeof snippet.code === "string") {
+      uniqueKey = snippet.code.replace(/\s+/g, "").substring(0, 100);
+    } else if (snippet.codeSnippet && typeof snippet.codeSnippet === "string") {
+      uniqueKey = snippet.codeSnippet.replace(/\s+/g, "").substring(0, 100);
+    } else if (snippet.content && typeof snippet.content === "string") {
+      // Use content as fallback for uniqueness
+      uniqueKey = snippet.content.replace(/\s+/g, "").substring(0, 100);
+    }
+    
+    // Only add if we have a unique key and haven't seen it before
+    if (uniqueKey && !seenContent.has(uniqueKey)) {
+      uniqueSnippets.push(snippet);
+      seenContent.add(uniqueKey);
+      
+      // Stop if we've reached the max
+      if (uniqueSnippets.length >= MAX_SNIPPETS) {
+        break;
+      }
+    } else if (!uniqueKey) {
+      // If no unique key can be generated, include the snippet anyway
+      uniqueSnippets.push(snippet);
+      
+      if (uniqueSnippets.length >= MAX_SNIPPETS) {
+        break;
       }
     }
   }
   
   console.log(`After deduplication: ${uniqueSnippets.length} unique snippets`);
-  return uniqueSnippets.slice(0, MAX_SNIPPETS);
+  return uniqueSnippets;
 }

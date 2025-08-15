@@ -115,78 +115,91 @@ export default function ChatSessionPage() {
     }
   };
 
-  const initializeAbly = async (userEmail: string) => {
-    // Guard clause to ensure we have email
-    if (!userEmail) {
-      console.error("Cannot initialize Ably without user email");
-      return;
-    }
+ const initializeAbly = async (userEmail: string) => {
+  if (!userEmail) {
+    console.error("Cannot initialize Ably without user email");
+    return;
+  }
 
-    try {
-      const tokenResponse = await fetch("/api/docs/ably-token");
-      const tokenRequest = await tokenResponse.json();
-      
-      const ably = new Ably.Realtime({
-        authCallback: (params, callback) => {
-          callback(null, tokenRequest);
-        }
-      });
-      
-      setAblyClient(ably);
-      ablyRef.current = ably; // Modified line 123: Store in ref as well
-      
-      // Subscribe to crawl updates with the correct channel name
-      const channel = ably.channels.get(`crawl-${userEmail}`);
-      
-      channel.subscribe("progress", (message) => {
-        handleCrawlProgress(message.data);
-      });
+  try {
+    const tokenResponse = await fetch("/api/docs/ably-token");
+    const tokenRequest = await tokenResponse.json();
+    
+    const ably = new Ably.Realtime({
+      authCallback: (params, callback) => {
+        callback(null, tokenRequest);
+      }
+    });
+    
+    setAblyClient(ably);
+    ablyRef.current = ably;
+    
+    // Subscribe to the user's channel
+    const channel = ably.channels.get(`crawl-${userEmail}`);
+    
+    channel.subscribe("progress", (message) => {
+      console.log("Progress update received:", message.data);
+      handleCrawlProgress(message.data);
+    });
 
-      // Log successful connection
-      ably.connection.on('connected', () => {
-        console.log(`Ably connected for channel: crawl-${userEmail}`);
-      });
+    ably.connection.on('connected', () => {
+      console.log(`Ably connected for channel: crawl-${userEmail}`);
+    });
 
-      // Handle connection errors
-      ably.connection.on('failed', (error) => {
-        console.error('Ably connection failed:', error);
-      });
-    } catch (error) {
-      console.error("Failed to initialize Ably:", error);
-    }
-  };
+    ably.connection.on('failed', (error) => {
+      console.error('Ably connection failed:', error);
+    });
+  } catch (error) {
+    console.error("Failed to initialize Ably:", error);
+  }
+};
 
   const handleCrawlProgress = (data: any) => {
-    if (data.status === "complete") {
-      setAttachedDocs(prev => prev.map(doc => 
-        doc.url === data.url 
-          ? { ...doc, status: "ready", progress: 100 }
-          : doc
-      ));
+  console.log("Crawl progress received:", data);
+  
+  // The data should contain the URL
+  if (!data.url) {
+    console.warn("Progress update missing URL:", data);
+    return;
+  }
+  
+  if (data.status === "complete") {
+    setAttachedDocs(prev => prev.map(doc => 
+      doc.url === data.url 
+        ? { ...doc, status: "ready", progress: 100 }
+        : doc
+    ));
+    
+    // Only show toast for docs attached in this session
+    if (attachedDocs.some(doc => doc.url === data.url)) {
       setToast({
-        message: "Documentation ready!",
+        message: `Documentation ready: ${new URL(data.url).hostname}`,
         type: "success",
         visible: true
       });
-    } else if (data.status === "crawling") {
-      setAttachedDocs(prev => prev.map(doc => 
-        doc.url === data.url 
-          ? { ...doc, progress: data.percentage || 0 }
-          : doc
-      ));
-    } else if (data.status === "error") {
-      setAttachedDocs(prev => prev.map(doc => 
-        doc.url === data.url 
-          ? { ...doc, status: "failed" }
-          : doc
-      ));
+    }
+  } else if (data.status === "crawling" || data.status === "embedding") {
+    setAttachedDocs(prev => prev.map(doc => 
+      doc.url === data.url 
+        ? { ...doc, progress: data.percentage || doc.progress }
+        : doc
+    ));
+  } else if (data.status === "error") {
+    setAttachedDocs(prev => prev.map(doc => 
+      doc.url === data.url 
+        ? { ...doc, status: "failed" }
+        : doc
+    ));
+    
+    if (attachedDocs.some(doc => doc.url === data.url)) {
       setToast({
-        message: `Failed to index ${data.url}`,
+        message: `Failed to index ${new URL(data.url).hostname}`,
         type: "error",
         visible: true
       });
     }
-  };
+  }
+};
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isStreaming) return;
@@ -287,49 +300,58 @@ export default function ChatSessionPage() {
     }
   };
 
-  const handleAttachDoc = async (url: string) => {
-    try {
-      const response = await fetch(`/api/chat/sessions/${sessionId}/attach`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ docUrl: url })
-      });
+
+const handleAttachDoc = async (url: string) => {
+  try {
+    const response = await fetch(`/api/chat/sessions/${sessionId}/attach`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ docUrl: url })
+    });
+    
+    if (!response.ok) throw new Error("Failed to attach document");
+    
+    const data = await response.json();
+    console.log("Attach response:", data);
+    
+    if (data.status === "indexing" || data.status === "queued") {
+      // Add the document to the list
+      setAttachedDocs(prev => [...prev, {
+        url,
+        name: new URL(url).hostname,
+        status: "indexing",
+        progress: 0
+      }]);
       
-      if (!response.ok) throw new Error("Failed to attach document");
+      // The channel is crawl-${userEmail}, which we're already subscribed to
+      // But we need to handle updates for THIS specific URL
+      // The backend sends the URL in the progress message
       
-      const data = await response.json();
-      
-      if (data.status === "indexing") {
-        setAttachedDocs(prev => [...prev, {
-          url,
-          name: new URL(url).hostname,
-          status: "indexing",
-          progress: 0
-        }]);
-        setToast({
-          message: "Indexing documentation...",
-          type: "info",
-          visible: true
-        });
-      } else {
-        setAttachedDocs(prev => [...prev, {
-          url,
-          name: new URL(url).hostname,
-          status: "ready",
-          progress: 100
-        }]);
-      }
-      
-      setShowAttachModal(false);
-    } catch (error) {
       setToast({
-        message: "Failed to attach document",
-        type: "error",
+        message: "Indexing documentation...",
+        type: "info",
         visible: true
       });
+    } else {
+      // Document is ready immediately
+      setAttachedDocs(prev => [...prev, {
+        url,
+        name: new URL(url).hostname,
+        status: "ready",
+        progress: 100
+      }]);
     }
-  };
-
+    
+    setShowAttachModal(false);
+  } catch (error) {
+    console.error("Attach error:", error);
+    setToast({
+      message: "Failed to attach document",
+      type: "error",
+      visible: true
+    });
+  }
+};
  const handleCompare = async (technology: string) => {
     setShowComparisons(false);
     setIsStreaming(true);
