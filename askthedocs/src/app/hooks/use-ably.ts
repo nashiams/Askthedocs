@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Ably from 'ably';
 
-export function useAbly(channelName: string, onMessage: (message: any) => void) {
+export function useAbly(channelName: string, onMessage: (message: Ably.Message) => void) {
   const [client, setClient] = useState<Ably.Realtime | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+
+  // Stabilize the onMessage callback
+  const stableOnMessage = useCallback(onMessage, [onMessage]);
 
   useEffect(() => {
     let ably: Ably.Realtime | null = null;
@@ -29,7 +32,7 @@ export function useAbly(channelName: string, onMessage: (message: any) => void) 
         });
         
         channel = ably.channels.get(channelName);
-        channel.subscribe(onMessage);
+        channel.subscribe(stableOnMessage);
         
         setClient(ably);
       } catch (error) {
@@ -47,7 +50,7 @@ export function useAbly(channelName: string, onMessage: (message: any) => void) 
         ably.close();
       }
     };
-  }, [channelName]);
+  }, [channelName, stableOnMessage]);
 
   return { client, isConnected };
 }

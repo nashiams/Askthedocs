@@ -12,6 +12,44 @@ export interface SnippetPayload extends ExtractedSnippet {
   indexedBy?: string;
 }
 
+interface ScrollFilter {
+  must?: Array<{
+    key: string;
+    match?: {
+      value: string | number | boolean;
+    };
+    range?: {
+      gte?: number;
+      lte?: number;
+    };
+  }>;
+  should?: Array<{
+    key: string;
+    match?: {
+      value: string | number | boolean;
+    };
+  }>;
+}
+
+interface SearchFilter {
+  must?: Array<{
+    key: string;
+    match?: {
+      value: string | number | boolean;
+    };
+    range?: {
+      gte?: number;
+      lte?: number;
+    };
+  }>;
+  should?: Array<{
+    key: string;
+    match?: {
+      value: string | number | boolean;
+    };
+  }>;
+}
+
 class QdrantService {
   private client: QdrantClient;
 
@@ -24,7 +62,7 @@ class QdrantService {
 
   async scroll(params: {
     collection_name: string;
-    scroll_filter?: any;
+    scroll_filter?: ScrollFilter;
     limit?: number;
     with_payload?: boolean | string[];
   }) {
@@ -90,7 +128,7 @@ class QdrantService {
   async searchSnippets(
     queryVector: number[],
     limit: number = 5,
-    filter?: any
+    filter?: SearchFilter
   ): Promise<SnippetSearchResult[]> {
     try {
       const results = await this.client.search(COLLECTION_NAME, {

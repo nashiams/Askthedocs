@@ -1,13 +1,19 @@
-// middleware.ts - CORRECTED VERSION
+// middleware.ts
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
 export async function middleware(request: NextRequest) {
-  // Use NextAuth's JWT helper instead of importing auth config
+  // NextAuth v5 uses different cookie names
+  const cookieName = process.env.NODE_ENV === "production"
+    ? "__Secure-authjs.session-token"
+    : "authjs.session-token";
+  
+  // Try multiple methods to get the token
   const token = await getToken({
     req: request,
     secret: process.env.NEXTAUTH_SECRET,
+    cookieName: cookieName,
   });
 
   // Check if user is authenticated
@@ -35,6 +41,5 @@ export const config = {
     "/api/test/:path*",
     "/api/docs/:path*",
     "/api/chat/:path*",
-    "/api/user/:path*",
   ],
 };

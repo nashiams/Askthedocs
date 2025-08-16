@@ -168,7 +168,7 @@ export async function POST(
 
     // Get snippets from attached docs
     let snippets: SnippetSearchResult[] = [];
-    let docCoverage = new Map<string, number>(); // Track snippets per doc
+    const docCoverage = new Map<string, number>(); // Track snippets per doc
     
     if (session.indexedDocs && session.indexedDocs.length > 0) {
       console.log(`Searching ${session.indexedDocs.length} docs for comparison: "${lastQuery}"`);

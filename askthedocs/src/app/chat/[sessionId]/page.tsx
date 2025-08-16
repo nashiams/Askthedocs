@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useParams } from "next/navigation";
 import { Menu, Plus, ArrowUp, } from "lucide-react";
 import { useInput } from "@/app/providers/input-context";
 import Ably from "ably";
@@ -12,11 +12,48 @@ import { ComparisonButtons } from "@/app/components/chat/comparison-buttons";
 import { AttachDocModal } from "@/app/components/chat/attach-doc-modal";
 import { Toast } from "@/app/components/ui/toast";
 
+interface UserInfo {
+  email: string;
+  name?: string;
+  avatar?: string;
+}
+
+interface ToastState {
+  message: string;
+  type: "error" | "success" | "info";
+  visible: boolean;
+}
+
+interface SessionMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: string;
+  sources?: string[];
+  snippets?: unknown[];
+}
+
+interface SessionData {
+  messages: SessionMessage[];
+  session: {
+    indexedDocs: Array<{
+      url: string;
+      name: string;
+    }>;
+  };
+}
+
+interface CrawlProgressData {
+  url?: string;
+  status: string;
+  percentage?: number;
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
-  snippets?: any[];
+  snippets?: string[];
   sources?: string[];
   comparisons?: string[];
   timestamp: Date;
@@ -33,7 +70,6 @@ interface AttachedDoc {
 
 export default function ChatSessionPage() {
   const params = useParams();
-  const router = useRouter();
   const sessionId = params.sessionId as string;
   const { inputValue, setInputValue, clearInput } = useInput();
   
@@ -43,28 +79,147 @@ export default function ChatSessionPage() {
   const [showAttachModal, setShowAttachModal] = useState(false);
   const [showDocsPanel, setShowDocsPanel] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [userInfo, setUserInfo] = useState<any>(null);
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [availableComparisons, setAvailableComparisons] = useState<string[]>([]);
   const [showComparisons, setShowComparisons] = useState(false);
-  const [toast, setToast] = useState<any>({ visible: false });
-  const [ablyClient, setAblyClient] = useState<Ably.Realtime | null>(null);
+  const [toast, setToast] = useState<ToastState>({ message: "", type: "info", visible: false });
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const streamingMessageRef = useRef<string>("");
-  const ablyRef = useRef<Ably.Realtime | null>(null); // Added ablyRef
+  const ablyRef = useRef<Ably.Realtime | null>(null);
 
   // Load session data and user info on mount
+  const loadSessionData = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/chat/sessions/${sessionId}`);
+      if (!response.ok) throw new Error("Failed to load session");
+      
+      const data: SessionData = await response.json();
+      setMessages(data.messages.map((msg) => ({
+        ...msg,
+        timestamp: new Date(msg.timestamp),
+        snippets: msg.snippets ? (msg.snippets as string[]) : undefined
+      })));
+      
+      setAttachedDocs(data.session.indexedDocs.map((doc) => ({
+        url: doc.url,
+        name: doc.name,
+        status: "ready" as const,
+        progress: 100
+      })));
+    } catch (error) {
+      setToast({
+        message: "Failed to load chat session",
+        type: "error",
+        visible: true
+      });
+    }
+  }, [sessionId]);
+
+  const getUserInfo = useCallback(async () => {
+    try {
+      const response = await fetch("/api/auth/session");
+      const data: { user?: UserInfo } = await response.json();
+      if (data?.user) {
+        setUserInfo(data.user);
+      }
+    } catch (error) {
+      console.error("Failed to get user info:", error);
+    }
+  }, []);
+
+  const handleCrawlProgress = useCallback((data: CrawlProgressData) => {
+    console.log("Crawl progress received:", data);
+    
+    // The data should contain the URL
+    if (!data.url) {
+      console.warn("Progress update missing URL:", data);
+      return;
+    }
+    
+    if (data.status === "complete") {
+      setAttachedDocs(prev => prev.map(doc => 
+        doc.url === data.url 
+          ? { ...doc, status: "ready", progress: 100 }
+          : doc
+      ));
+      
+      // Only show toast for docs attached in this session
+      setToast({
+        message: `Documentation ready: ${new URL(data.url).hostname}`,
+        type: "success",
+        visible: true
+      });
+    } else if (data.status === "crawling" || data.status === "embedding") {
+      setAttachedDocs(prev => prev.map(doc => 
+        doc.url === data.url 
+          ? { ...doc, progress: data.percentage || doc.progress }
+          : doc
+      ));
+    } else if (data.status === "error") {
+      setAttachedDocs(prev => prev.map(doc => 
+        doc.url === data.url 
+          ? { ...doc, status: "failed" }
+          : doc
+      ));
+      
+      setToast({
+        message: `Failed to index ${new URL(data.url).hostname}`,
+        type: "error",
+        visible: true
+      });
+    }
+  }, []);
+
+  const initializeAbly = useCallback(async (userEmail: string) => {
+    if (!userEmail) {
+      console.error("Cannot initialize Ably without user email");
+      return;
+    }
+
+    try {
+      const tokenResponse = await fetch("/api/docs/ably-token");
+      const tokenRequest = await tokenResponse.json();
+      
+      const ably = new Ably.Realtime({
+        authCallback: (params, callback) => {
+          callback(null, tokenRequest);
+        }
+      });
+      
+      ablyRef.current = ably;
+      
+      // Subscribe to the user's channel
+      const channel = ably.channels.get(`crawl-${userEmail}`);
+      
+      channel.subscribe("progress", (message) => {
+        console.log("Progress update received:", message.data);
+        handleCrawlProgress(message.data as CrawlProgressData);
+      });
+
+      ably.connection.on('connected', () => {
+        console.log(`Ably connected for channel: crawl-${userEmail}`);
+      });
+
+      ably.connection.on('failed', (error) => {
+        console.error('Ably connection failed:', error);
+      });
+    } catch (error) {
+      console.error("Failed to initialize Ably:", error);
+    }
+  }, [handleCrawlProgress]);
+
   useEffect(() => {
     loadSessionData();
     getUserInfo();
-  }, [sessionId]);
+  }, [loadSessionData, getUserInfo]);
 
   // Initialize Ably ONLY after userInfo is loaded
   useEffect(() => {
     if (userInfo?.email) {
       initializeAbly(userInfo.email);
     }
-  }, [userInfo]);
+  }, [userInfo, initializeAbly]);
 
   // Modified line 64-71: Fix Ably cleanup to use ref and empty dependency array
   useEffect(() => {
@@ -76,130 +231,6 @@ export default function ChatSessionPage() {
       }
     };
   }, []); // Empty dependency array - only on unmount
-
-  const loadSessionData = async () => {
-    try {
-      const response = await fetch(`/api/chat/sessions/${sessionId}`);
-      if (!response.ok) throw new Error("Failed to load session");
-      
-      const data = await response.json();
-      setMessages(data.messages.map((msg: any) => ({
-        ...msg,
-        timestamp: new Date(msg.timestamp)
-      })));
-      
-      setAttachedDocs(data.session.indexedDocs.map((doc: any) => ({
-        url: doc.url,
-        name: doc.name,
-        status: "ready",
-        progress: 100
-      })));
-    } catch (error) {
-      setToast({
-        message: "Failed to load chat session",
-        type: "error",
-        visible: true
-      });
-    }
-  };
-
-  const getUserInfo = async () => {
-    try {
-      const response = await fetch("/api/auth/session");
-      const data = await response.json();
-      if (data?.user) {
-        setUserInfo(data.user);
-      }
-    } catch (error) {
-      console.error("Failed to get user info:", error);
-    }
-  };
-
- const initializeAbly = async (userEmail: string) => {
-  if (!userEmail) {
-    console.error("Cannot initialize Ably without user email");
-    return;
-  }
-
-  try {
-    const tokenResponse = await fetch("/api/docs/ably-token");
-    const tokenRequest = await tokenResponse.json();
-    
-    const ably = new Ably.Realtime({
-      authCallback: (params, callback) => {
-        callback(null, tokenRequest);
-      }
-    });
-    
-    setAblyClient(ably);
-    ablyRef.current = ably;
-    
-    // Subscribe to the user's channel
-    const channel = ably.channels.get(`crawl-${userEmail}`);
-    
-    channel.subscribe("progress", (message) => {
-      console.log("Progress update received:", message.data);
-      handleCrawlProgress(message.data);
-    });
-
-    ably.connection.on('connected', () => {
-      console.log(`Ably connected for channel: crawl-${userEmail}`);
-    });
-
-    ably.connection.on('failed', (error) => {
-      console.error('Ably connection failed:', error);
-    });
-  } catch (error) {
-    console.error("Failed to initialize Ably:", error);
-  }
-};
-
-  const handleCrawlProgress = (data: any) => {
-  console.log("Crawl progress received:", data);
-  
-  // The data should contain the URL
-  if (!data.url) {
-    console.warn("Progress update missing URL:", data);
-    return;
-  }
-  
-  if (data.status === "complete") {
-    setAttachedDocs(prev => prev.map(doc => 
-      doc.url === data.url 
-        ? { ...doc, status: "ready", progress: 100 }
-        : doc
-    ));
-    
-    // Only show toast for docs attached in this session
-    if (attachedDocs.some(doc => doc.url === data.url)) {
-      setToast({
-        message: `Documentation ready: ${new URL(data.url).hostname}`,
-        type: "success",
-        visible: true
-      });
-    }
-  } else if (data.status === "crawling" || data.status === "embedding") {
-    setAttachedDocs(prev => prev.map(doc => 
-      doc.url === data.url 
-        ? { ...doc, progress: data.percentage || doc.progress }
-        : doc
-    ));
-  } else if (data.status === "error") {
-    setAttachedDocs(prev => prev.map(doc => 
-      doc.url === data.url 
-        ? { ...doc, status: "failed" }
-        : doc
-    ));
-    
-    if (attachedDocs.some(doc => doc.url === data.url)) {
-      setToast({
-        message: `Failed to index ${new URL(data.url).hostname}`,
-        type: "error",
-        visible: true
-      });
-    }
-  }
-};
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isStreaming) return;
@@ -322,10 +353,7 @@ const handleAttachDoc = async (url: string) => {
         status: "indexing",
         progress: 0
       }]);
-      
-      // The channel is crawl-${userEmail}, which we're already subscribed to
-      // But we need to handle updates for THIS specific URL
-      // The backend sends the URL in the progress message
+    
       
       setToast({
         message: "Indexing documentation...",
@@ -502,7 +530,16 @@ const handleAttachDoc = async (url: string) => {
 
           {/* Messages Area */}
           <div className="flex-1 relative z-10 overflow-y-auto hide-scrollbar">
-            <MessageList messages={messages as Message[]} />
+            <MessageList messages={messages.map(msg => ({
+              ...msg,
+              snippets: msg.snippets
+                ? msg.snippets.map((snippet: string | Record<string, unknown>) => 
+                    typeof snippet === "string"
+                      ? { content: snippet } // adapt to MessageSnippet shape
+                      : snippet
+                  )
+                : undefined
+            }))} />
             
             {/* Comparison Buttons */}
             {showComparisons && availableComparisons.length > 0 && (
@@ -572,10 +609,10 @@ const handleAttachDoc = async (url: string) => {
 
       {/* Toast */}
       <Toast
-        message={toast.message as string}
-        type={toast.type as "error" | "success" | "info" | undefined}
-        isVisible={toast.visible as boolean}
-        onClose={() => setToast((prev: typeof toast) => ({ ...prev, visible: false }))}
+        message={toast.message}
+        type={toast.type}
+        isVisible={toast.visible}
+        onClose={() => setToast(prev => ({ ...prev, visible: false }))}
       />   
     </div>
   );

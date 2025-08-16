@@ -138,7 +138,7 @@ export async function saveIndexedDoc(data: {
 export async function updateIndexedDocStatus(
   jobId: string,
   status: string,
-  metadata?: any
+  metadata?: Record<string, unknown>
 ) {
   const db = await getDatabase();
   const indexed_docs = db.collection("indexed_docs");

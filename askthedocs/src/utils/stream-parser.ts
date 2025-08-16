@@ -1,7 +1,16 @@
+interface StreamSnippet {
+  id?: string;
+  content?: string;
+  heading?: string;
+  sourceUrl?: string;
+  score?: number;
+  [key: string]: unknown;
+}
+
 export interface StreamData {
   type: 'chunk' | 'metadata' | 'comparisons' | 'done' | 'error';
   content?: string;
-  snippets?: any[];
+  snippets?: StreamSnippet[];
   sources?: string[];
   comparisons?: string[];
   tokensUsed?: number;
