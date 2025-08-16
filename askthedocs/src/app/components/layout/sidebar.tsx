@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import Image from "next/image";
 import { BookOpen, Edit, X, LogOut } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useChatSessions } from "@/app/providers/chat-sessions-context";
@@ -14,6 +15,14 @@ interface SidebarProps {
     email?: string;
     image?: string;
   } | null;
+}
+
+interface SessionData {
+  id: string;
+  title?: string;
+  indexedDocs?: unknown[];
+  messageCount?: number;
+  updatedAt: string;
 }
 
 // Generate a random color based on string (for consistent colors)
@@ -67,7 +76,7 @@ export function Sidebar({ isOpen, onClose, userInfo }: SidebarProps) {
         setRefreshNeeded(true);
       }
     }
-  }, [pathname, sessions]);
+  }, [pathname, sessions, setRefreshNeeded]);
 
   const handleLogout = async () => {
     await signOut({ redirect: false });
@@ -92,7 +101,7 @@ export function Sidebar({ isOpen, onClose, userInfo }: SidebarProps) {
   };
 
   // Format session title with dynamic metadata
-  const formatSessionTitle = (session: any) => {
+  const formatSessionTitle = (session: SessionData) => {
     if (session.title && session.title !== "New Chat") {
       return session.title;
     }
@@ -103,7 +112,7 @@ export function Sidebar({ isOpen, onClose, userInfo }: SidebarProps) {
       return `Chat with ${docCount} doc${docCount > 1 ? 's' : ''}`;
     }
     
-    if (session.messageCount > 0) {
+    if (session.messageCount && session.messageCount > 0) {
       return `Chat (${session.messageCount} messages)`;
     }
     
@@ -241,10 +250,12 @@ export function Sidebar({ isOpen, onClose, userInfo }: SidebarProps) {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               {userInfo?.image && !imageError ? (
-                <img 
+                <Image 
                   src={userInfo.image} 
-                  alt={userInfo.name || ""} 
-                  className="w-8 h-8 rounded-full"
+                  alt={userInfo.name || "User"} 
+                  width={32}
+                  height={32}
+                  className="rounded-full"
                   onError={handleImageError}
                 />
               ) : (

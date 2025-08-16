@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { BookOpen, Menu } from "lucide-react";
 import { useInput } from "@/app/providers/input-context";
@@ -18,15 +18,20 @@ type ToastState = {
   visible: boolean;
 };
 
+interface UserInfo {
+  email: string;
+  name?: string;
+  image?: string;
+}
+
 export default function HomePage() {
   const router = useRouter();
   const { inputValue, clearInput } = useInput();
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [showGradient, setShowGradient] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userInfo, setUserInfo] = useState<any>(null);
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [crawlStatus, setCrawlStatus] = useState<{
     isVisible: boolean;
@@ -49,42 +54,7 @@ export default function HomePage() {
     checkAuthStatus();
   }, []);
 
-  // Initialize Ably only after we have userInfo
-  useEffect(() => {
-    if (userInfo?.email && !ablyRef.current) {
-      initializeAbly(userInfo.email);
-    }
-  }, [userInfo]);
-
-  const checkAuthStatus = async () => {
-    setIsCheckingAuth(true);
-    
-    try {
-      const isLoggedIn = await checkAuth();
-      
-      if (isLoggedIn) {
-        const response = await fetch("/api/auth/session");
-        const data = await response.json();
-        
-        if (data?.user) {
-          setIsAuthenticated(true);
-          setUserInfo(data.user);
-          // Don't initialize Ably here - wait for useEffect
-        } else {
-          setIsAuthenticated(false);
-        }
-      } else {
-        setIsAuthenticated(false);
-      }
-    } catch (error) {
-      console.error("Auth check failed:", error);
-      setIsAuthenticated(false);
-    }
-    
-    setIsCheckingAuth(false);
-  };
-
-  const initializeAbly = async (userEmail: string) => {
+  const initializeAbly = useCallback(async (userEmail: string) => {
     if (!userEmail || ablyRef.current) return;
     
     try {
@@ -102,7 +72,6 @@ export default function HomePage() {
       ablyRef.current = ably;
       const channel = ably.channels.get(`crawl-${userEmail}`);
       
-      // Modified section: Update Ably handler to navigate when complete (lines 91-123)
       channel.subscribe("progress", (message) => {
         const data = message.data;
         console.log("Ably progress update:", data);
@@ -148,7 +117,42 @@ export default function HomePage() {
     } catch (error) {
       console.error("Failed to initialize Ably:", error);
     }
+  }, [router]);
+
+  const checkAuthStatus = async () => {
+    setIsCheckingAuth(true);
+    
+    try {
+      const isLoggedIn = await checkAuth();
+      
+      if (isLoggedIn) {
+        const response = await fetch("/api/auth/session");
+        const data = await response.json();
+        
+        if (data?.user) {
+          setIsAuthenticated(true);
+          setUserInfo(data.user);
+          // Don't initialize Ably here - wait for useEffect
+        } else {
+          setIsAuthenticated(false);
+        }
+      } else {
+        setIsAuthenticated(false);
+      }
+    } catch (error) {
+      console.error("Auth check failed:", error);
+      setIsAuthenticated(false);
+    }
+    
+    setIsCheckingAuth(false);
   };
+
+  // Initialize Ably only after we have userInfo
+  useEffect(() => {
+    if (userInfo?.email && !ablyRef.current) {
+      initializeAbly(userInfo.email);
+    }
+  }, [userInfo, initializeAbly]);
 
   const isValidUrl = (url: string) => {
     try {
@@ -323,16 +327,14 @@ export default function HomePage() {
   // Logged in view
   return (
     <div className="relative w-full h-screen overflow-hidden">
-      {showGradient && (
-        <div
-          className="absolute inset-0 gradient-bg fade-gradient"
-          style={{
-            opacity: showGradient ? 1 : 0,
-            transition: "opacity 0.8s ease-in-out",
-            zIndex: 0
-          }}
-        />
-      )}
+      <div
+        className="absolute inset-0 gradient-bg fade-gradient"
+        style={{
+          opacity: 1,
+          transition: "opacity 0.8s ease-in-out",
+          zIndex: 0
+        }}
+      />
       
       <div className="relative flex h-full text-white font-sans z-10">
         <Sidebar 

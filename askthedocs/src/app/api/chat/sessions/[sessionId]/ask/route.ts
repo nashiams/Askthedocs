@@ -69,7 +69,9 @@ export async function POST(
     }
 
     const { sessionId } = params;
-    let { query, model = "gpt-4o-mini" } = await req.json();
+    const requestData = await req.json();
+    let { query } = requestData;
+    const { model = "gpt-4o-mini" } = requestData;
 
     if (!query?.trim()) {
       return new Response("Query is required", { status: 400 });
@@ -133,7 +135,7 @@ export async function POST(
 
     // Get snippets from attached docs
     let snippets: SnippetSearchResult[] = [];
-    let snippetsByDoc: Map<string, SnippetSearchResult[]> = new Map();
+    const snippetsByDoc: Map<string, SnippetSearchResult[]> = new Map();
     
     if (session.indexedDocs && session.indexedDocs.length > 0) {
       // Search for snippets - increase limit for multiple docs

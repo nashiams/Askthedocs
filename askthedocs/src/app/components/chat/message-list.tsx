@@ -3,11 +3,25 @@
 import { ExternalLink } from "lucide-react";
 import { CodeSnippet } from "./code-snippet";
 
+interface MessageSnippet {
+  id?: string;
+  code?: string;
+  codeSnippet?: string;
+  content?: string;
+  language?: string;
+  purpose?: string;
+  heading?: string;
+  parentHeading?: string;
+  sourceUrl?: string;
+  docName?: string;
+  type?: string;
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
-  snippets?: any[];
+  snippets?: MessageSnippet[];
   sources?: string[];
   timestamp: Date;
   type?: "answer" | "comparison";
@@ -122,7 +136,7 @@ export function MessageList({ messages }: MessageListProps) {
   };
 
   // Helper function to render a snippet based on its type
-  const renderSnippet = (snippet: any, index: number) => {
+  const renderSnippet = (snippet: MessageSnippet, index: number) => {
     // Check if it's a code snippet (has code or codeSnippet property and type is 'code' or has language)
     const hasCode = snippet.code || snippet.codeSnippet;
     const isCodeType = snippet.type === 'code' || snippet.language;
@@ -133,7 +147,7 @@ export function MessageList({ messages }: MessageListProps) {
         <CodeSnippet 
           key={index} 
           snippet={{
-            code: snippet.code || snippet.codeSnippet,
+            code: snippet.code || snippet.codeSnippet || "",
             language: snippet.language || 'plaintext',
             purpose: snippet.purpose || snippet.heading,
             sourceUrl: snippet.sourceUrl
