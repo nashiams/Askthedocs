@@ -553,21 +553,34 @@ export async function POST(
             );
           }
 
-          // Get comparisons - suggest similar technologies
           const comparisonsResponse = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
               {
                 role: "system",
-                content:
-                  "Suggest 2-3 similar technologies. Return ONLY JSON array.",
+                content: `You are a tech comparison assistant. Based on the user's question and the documentation context, identify what TYPE of technology/tool they are asking about, then suggest 2-3 SIMILAR alternatives.
+
+          IMPORTANT: 
+          - Focus on the main technology/tool being discussed, not peripheral concepts
+          - If asking about pricing/features of Tool X, suggest competitors to Tool X
+          - If asking about a method in Library Y, suggest similar libraries
+          - Return ONLY a JSON array of strings with the alternative names
+
+          Examples:
+          - User asks about "Firecrawl pricing" → ["Apify", "Scrapy Cloud", "Bright Data"]
+          - User asks about "React useState" → ["Vue.js", "Svelte", "Angular"]
+          - User asks about "Stripe payment flow" → ["PayPal", "Square", "Braintree"]`,
               },
               {
                 role: "user",
-                content: `Learning about: ${query.substring(0, 100)}`,
+                content: `Original question: ${query}
+
+          Documentation sources being used: ${sourcesUsed.join(', ')}
+
+          Based on the context, what is the MAIN technology/tool being discussed? Suggest 2-3 direct competitors or alternatives to THAT specific tool.`,
               },
             ],
-            temperature: 0.5,
+            temperature: 0.3, // Lower temperature for more consistent results
             max_tokens: 50,
           });
 
@@ -577,7 +590,14 @@ export async function POST(
             comparisons = JSON.parse(
               text.replace(/```json\n?|```\n?/g, "").trim()
             );
+            
+            // Validate that we got an array of strings
+            if (!Array.isArray(comparisons) || comparisons.some(c => typeof c !== 'string')) {
+              console.error('Invalid comparisons format:', comparisons);
+              comparisons = [];
+            }
           } catch (e) {
+            console.error('Failed to parse comparisons:', e);
             comparisons = [];
           }
 

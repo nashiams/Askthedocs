@@ -1,5 +1,9 @@
 export async function discoverViaSitemap(baseUrl: string): Promise<string[]> {
-  const possibleSitemaps = [
+  const inputUrl = new URL(baseUrl);
+  const scopePath = inputUrl.pathname; // This is the path user wants to scope to
+  
+  // Determine sitemap locations based on whether we're at root or a subpath
+  const possibleSitemaps = scopePath === '/' ? [
     '/sitemap.xml',
     '/sitemap_index.xml',
     '/sitemap.txt',
@@ -7,15 +11,23 @@ export async function discoverViaSitemap(baseUrl: string): Promise<string[]> {
     '/api/sitemap.xml',
     '/sitemap',
     '/sitemap-0.xml',
+  ] : [
+    // For subpaths, try both root sitemap and local sitemap
+    '/sitemap.xml',
+    '/sitemap_index.xml',
+    `${scopePath}/sitemap.xml`,
+    `${scopePath.replace(/\/$/, '')}/sitemap.xml`,
   ];
   
   // Always include the input URL itself
   const discoveredUrls = new Set<string>([baseUrl]);
   
+  console.log(`Discovering URLs scoped to: ${inputUrl.origin}${scopePath}`);
+  
   // Try sitemap discovery first
   for (const path of possibleSitemaps) {
     try {
-      const sitemapUrl = new URL(path, baseUrl).href;
+      const sitemapUrl = new URL(path, inputUrl.origin).href;
       console.log(`Trying sitemap: ${sitemapUrl}`);
       
       const response = await fetch(sitemapUrl, {
@@ -40,7 +52,8 @@ export async function discoverViaSitemap(baseUrl: string): Promise<string[]> {
               if (nestedResponse.ok) {
                 const nestedContent = await nestedResponse.text();
                 const urls = [...nestedContent.matchAll(/<loc>(.*?)<\/loc>/g)]
-                  .map(match => match[1].trim());
+                  .map(match => match[1].trim())
+                  .filter(url => isUrlInScope(url, inputUrl)); // Filter by scope
                 urls.forEach(url => discoveredUrls.add(url));
               }
             } catch (e) {
@@ -48,9 +61,10 @@ export async function discoverViaSitemap(baseUrl: string): Promise<string[]> {
             }
           }
         } else {
-          // Regular sitemap - extract all URLs
+          // Regular sitemap - extract all URLs and filter by scope
           const urls = [...content.matchAll(/<loc>(.*?)<\/loc>/g)]
-            .map(match => match[1].trim());
+            .map(match => match[1].trim())
+            .filter(url => isUrlInScope(url, inputUrl));
           urls.forEach(url => discoveredUrls.add(url));
         }
       }
@@ -59,7 +73,8 @@ export async function discoverViaSitemap(baseUrl: string): Promise<string[]> {
       if (!content.includes('<') && content.includes('http')) {
         const urls = content.split('\n')
           .map(line => line.trim())
-          .filter(line => line.startsWith('http'));
+          .filter(line => line.startsWith('http'))
+          .filter(url => isUrlInScope(url, inputUrl));
         urls.forEach(url => discoveredUrls.add(url));
       }
     } catch (e) {
@@ -68,7 +83,7 @@ export async function discoverViaSitemap(baseUrl: string): Promise<string[]> {
     }
   }
   
-  console.log(`Found ${discoveredUrls.size} URLs from sitemap`);
+  console.log(`Found ${discoveredUrls.size} URLs from sitemap within scope`);
   
   // If no sitemap found or very few URLs, use HTML scraping
   if (discoveredUrls.size <= 5) {
@@ -77,21 +92,48 @@ export async function discoverViaSitemap(baseUrl: string): Promise<string[]> {
     scrapedUrls.forEach(url => discoveredUrls.add(url));
   }
   
-  return filterDocumentationUrls(Array.from(discoveredUrls));
+  return filterDocumentationUrls(Array.from(discoveredUrls), inputUrl);
 }
 
-// Improved HTML discovery with better crawling
+// Helper function to check if URL is within the user's specified scope
+function isUrlInScope(url: string, inputUrl: URL): boolean {
+  try {
+    const checkUrl = new URL(url);
+    
+    // Must be same origin
+    if (checkUrl.origin !== inputUrl.origin) return false;
+    
+    // If user specified a path (not root), URL must be under that path
+    if (inputUrl.pathname !== '/' && inputUrl.pathname !== '') {
+      // Normalize paths for comparison
+      const scopePath = inputUrl.pathname.replace(/\/$/, '').toLowerCase();
+      const urlPath = checkUrl.pathname.toLowerCase();
+      
+      // URL path must start with the scope path
+      return urlPath === scopePath || urlPath.startsWith(scopePath + '/');
+    }
+    
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Improved HTML discovery with better crawling and scope awareness
 export async function discoverViaHtmlScraping(url: string): Promise<string[]> {
-  const baseUrl = new URL(url);
+  const inputUrl = new URL(url);
+  const scopePath = inputUrl.pathname;
   const visited = new Set<string>();
   const toVisit = [url];
   const foundPages: string[] = [];
   const maxPages = 200;
-  const maxDepth = 5; // Add depth limit to avoid going too deep
+  const maxDepth = 5;
   
   // Track depth of each URL
   const urlDepth = new Map<string, number>();
   urlDepth.set(url, 0);
+
+  console.log(`HTML scraping with scope: ${inputUrl.origin}${scopePath}`);
 
   while (toVisit.length > 0 && foundPages.length < maxPages) {
     const currentUrl = toVisit.shift()!;
@@ -134,7 +176,7 @@ export async function discoverViaHtmlScraping(url: string): Promise<string[]> {
         
         // Convert relative URLs to absolute
         if (link.startsWith("/")) {
-          absoluteLink = `${baseUrl.origin}${link}`;
+          absoluteLink = `${inputUrl.origin}${link}`;
         } else if (!link.startsWith("http")) {
           // Handle relative paths
           try {
@@ -147,8 +189,8 @@ export async function discoverViaHtmlScraping(url: string): Promise<string[]> {
         try {
           const linkUrl = new URL(absoluteLink);
           
-          // Skip external links
-          if (linkUrl.origin !== baseUrl.origin) continue;
+          // Check if URL is within scope
+          if (!isUrlInScope(absoluteLink, inputUrl)) continue;
           
           // Skip already visited or queued
           if (visited.has(absoluteLink) || toVisit.includes(absoluteLink)) continue;
@@ -160,23 +202,27 @@ export async function discoverViaHtmlScraping(url: string): Promise<string[]> {
           // Check if this is a documentation-like URL
           const pathname = linkUrl.pathname.toLowerCase();
           
-          // More inclusive patterns for Vite docs
+          // More inclusive patterns for documentation
           const includePatterns = [
             '/guide/', '/config/', '/plugins/', '/api/',
+            '/docs/', '/documentation/', '/reference/',
+            '/tutorial/', '/examples/', '/getting-started/',
             '.html', // Include HTML pages
-            '/blog/' // Sometimes docs are in blog
           ];
           
           const excludePatterns = [
             '.pdf', '.zip', '.tar', '.gz', 
             '/assets/', '/images/', '/_nuxt/',
-            '.png', '.jpg', '.svg', '.css', '.js'
+            '.png', '.jpg', '.svg', '.css', '.js',
+            '/downloads/', '/media/'
           ];
           
-          // Check if we should include this URL
-          const shouldInclude = includePatterns.some(p => pathname.includes(p)) ||
-                               pathname === '/' || // Include root
-                               pathname.split('/').length <= 3; // Include shallow paths
+          // For scoped searches, be more inclusive
+          const shouldInclude = scopePath !== '/' ? 
+            true : // If scoped, include everything under the scope
+            includePatterns.some(p => pathname.includes(p)) ||
+            pathname === '/' ||
+            pathname.split('/').length <= 3;
           
           const shouldExclude = excludePatterns.some(p => pathname.includes(p));
           
@@ -196,16 +242,21 @@ export async function discoverViaHtmlScraping(url: string): Promise<string[]> {
     await new Promise(resolve => setTimeout(resolve, 100));
   }
 
-  console.log(`HTML scraping found ${foundPages.length} pages`);
+  console.log(`HTML scraping found ${foundPages.length} pages within scope`);
   return dedupeUrls(foundPages);
 }
 
-function filterDocumentationUrls(urls: string[]): string[] {
+function filterDocumentationUrls(urls: string[], inputUrl: URL): string[] {
   const normalizedUrls = new Set<string>();
+  const scopePath = inputUrl.pathname.replace(/\/$/, '').toLowerCase();
   
   for (const url of urls) {
     try {
       const urlObj = new URL(url);
+      
+      // Double-check scope
+      if (!isUrlInScope(url, inputUrl)) continue;
+      
       // Remove trailing slashes and fragments
       urlObj.hash = '';
       let normalized = urlObj.href;
@@ -219,48 +270,60 @@ function filterDocumentationUrls(urls: string[]): string[] {
     }
   }
   
-  // Be less aggressive with filtering for Vite-like docs
+  // Filter out foreign languages - only keep English
   const filtered = Array.from(normalizedUrls).filter(url => {
     const lower = url.toLowerCase();
+    const pathname = new URL(url).pathname.toLowerCase();
     
-    // Skip foreign languages (but be careful not to exclude valid paths)
+    // Foreign language patterns to exclude
     const foreignLanguagePatterns = [
       '/zh-cn/', '/zh-tw/', '/ja/', '/ko/', '/es/', '/fr/',
       '/de/', '/ru/', '/pt/', '/it/', '/ar/', '/hi/',
-      '/zh/', '/jp/', '/kr/' // Shorter variants
+      '/zh/', '/jp/', '/kr/', '/nl/', '/pl/', '/tr/',
+      '/id/', '/th/', '/vi/', '/cs/', '/da/', '/fi/',
+      '/el/', '/he/', '/hu/', '/no/', '/ro/', '/sk/',
+      '/sv/', '/uk/', '/bg/', '/ca/', '/hr/', '/lt/',
+      '/lv/', '/sl/', '/sr/', '/et/', '/is/', '/mk/',
+      '/sq/', '/bs/', '/mt/', '/ga/', '/cy/', '/eu/',
+      '/gl/', '/lb/', '/fa/', '/ur/', '/bn/', '/ta/',
+      '/te/', '/ml/', '/kn/', '/mr/', '/gu/', '/pa/'
     ];
     
-    // Check if it's actually a foreign language path
-    const isForeignLanguage = foreignLanguagePatterns.some(pattern => {
-      const parts = lower.split('/');
-      return parts.some(part => part === pattern.replace(/\//g, ''));
+    // Check URL path segments for language codes
+    const pathSegments = pathname.split('/').filter(s => s);
+    const hasLanguageCode = foreignLanguagePatterns.some(pattern => {
+      const langCode = pattern.replace(/\//g, '');
+      return pathSegments.includes(langCode) || 
+             pathSegments.some(seg => seg === langCode || seg.startsWith(langCode + '-'));
     });
     
-    if (isForeignLanguage) return false;
+    if (hasLanguageCode) return false;
     
-    // Skip non-documentation pages
-    const skipPatterns = [
+    // Also check for language in query params
+    const urlObj = new URL(url);
+    const lang = urlObj.searchParams.get('lang') || urlObj.searchParams.get('locale');
+    if (lang && lang !== 'en' && !lang.startsWith('en-')) {
+      return false;
+    }
+    
+    // Skip non-documentation pages (but be less aggressive when scoped)
+    const skipPatterns = scopePath !== '/' ? [
+      // When scoped, only skip authentication and legal pages
+      '/signin', '/login', '/register', '/logout',
+      '/privacy', '/terms', '/cookies'
+    ] : [
+      // When not scoped, skip more broadly
       '/signin', '/login', '/register', '/logout',
       '/privacy', '/terms', '/cookies',
-      '/careers', '/jobs', '/about/team'
+      '/careers', '/jobs', '/about/team', '/blog',
+      '/pricing', '/contact', '/support'
     ];
     
     if (skipPatterns.some(pattern => lower.includes(pattern))) {
       return false;
     }
     
-    // For Vite specifically, include most paths under /guide/
-    if (url.includes('vite.dev')) {
-      // Include everything under /guide/, /config/, /plugins/
-      if (lower.includes('/guide/') || 
-          lower.includes('/config/') || 
-          lower.includes('/plugins/') ||
-          lower.includes('/blog/') && lower.includes('announcing')) {
-        return true;
-      }
-    }
-    
-    return true; // Be inclusive by default
+    return true;
   });
   
   // Sort URLs by path depth (shallower first) and alphabetically
@@ -271,8 +334,8 @@ function filterDocumentationUrls(urls: string[]): string[] {
     return a.localeCompare(b);
   });
   
-  console.log(`After filtering: ${filtered.length} URLs`);
-  return filtered.slice(0, 200); // Increase limit
+  console.log(`After filtering: ${filtered.length} URLs (scoped to ${inputUrl.origin}${scopePath})`);
+  return filtered.slice(0, 200);
 }
 
 function dedupeUrls(urls: string[]): string[] {
@@ -310,6 +373,10 @@ function normalizeUrl(url: string): string {
 // Main entry point that combines both methods
 export async function discoverAllUrls(baseUrl: string): Promise<string[]> {
   console.log(`Starting URL discovery for: ${baseUrl}`);
+  
+  // Parse the input URL to understand the scope
+  const inputUrl = new URL(baseUrl);
+  console.log(`Scope: ${inputUrl.origin}${inputUrl.pathname}`);
   
   // Try sitemap first (which now includes HTML fallback)
   const urls = await discoverViaSitemap(baseUrl);

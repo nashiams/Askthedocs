@@ -3,16 +3,7 @@
 import { useState } from "react";
 import { Loader2, CheckCircle, X, ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
-
-interface CrawlProgressModalProps {
-  isVisible: boolean;
-  onClose: () => void;
-  url?: string;
-  sessionId?: string;
-  status: "idle" | "crawling" | "complete" | "error";
-  progress?: number;
-  message?: string;
-}
+import { CrawlProgressModalProps } from "@/types/frontend/home";
 
 export function CrawlProgressModal({ 
   isVisible, 
@@ -107,7 +98,7 @@ export function CrawlProgressModal({
               <p className="text-sm text-gray-400 mb-4">{message}</p>
             )}
             <p className="text-xs text-gray-500">
-              You can browse other chats while waiting...
+              Please wait until the indexing is complete. This may take a few minutes depending on the size of the documentation.
             </p>
           </>
         )}
