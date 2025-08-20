@@ -2,43 +2,34 @@
 
 > AI-powered documentation assistant that crawls and indexes documentation in real-time to provide accurate, hallucination-free answers.
 
-AskTheDocs revolutionizes how developers interact with documentation by allowing you to attach any documentation URL and get instant, contextual answers backed by actual documentation content.
+AskTheDocs just add chatbot to all documentations by allowing you to attach any documentation URL and get instant, contextual answers backed by actual documentation content.
 
 ## Features
 
-### 🚀 Real-time Documentation Crawling
+### Real-time Documentation Crawling
 
 - **Intelligent Crawling**: Automatically discovers pages via sitemaps or HTML scraping
-- **Dual Processing**: Uses Firecrawl API for premium extraction with manual fallback
-- **Smart Deduplication**: Removes duplicate content across pages
 - **Progress Tracking**: Real-time crawling progress with Ably WebSocket updates
 
-### 💬 Advanced Chat Interface
+### Advanced Chat Interface
 
 - **Multi-document Conversations**: Attach multiple documentation sources to a single chat
 - **Streaming Responses**: Real-time answer generation with context snippets
 - **Source Attribution**: Every answer includes links back to original documentation
 - **Code Snippet Highlighting**: Syntax-highlighted code examples with copy functionality
 
-### 🔍 Intelligent Search & Retrieval
+### Intelligent Search & Retrieval
 
 - **Vector Search**: Qdrant-powered semantic search across documentation
 - **Smart Document Targeting**: Automatically identifies which docs are most relevant to queries
 - **Context-aware Suggestions**: Provides alternative questions when no matches found
 - **Comparison Mode**: Compare technologies side-by-side using their documentation
 
-### 🎯 User Experience
-
-- **Session Management**: Persistent chat sessions with automatic titling
-- **Authentication**: Secure Google/GitHub OAuth integration
-- **Responsive Design**: Works seamlessly across desktop and mobile
-- **Dark Theme**: Beautiful gradient background with modern UI components
-
 ## Tech Stack
 
 ### Frontend
 
-- **Next.js 14** - React framework with App Router
+- **Next.js** - React framework with App Router
 - **TypeScript** - Type-safe development
 - **Tailwind CSS** - Utility-first styling
 - **Ably** - Real-time WebSocket communication
@@ -59,11 +50,10 @@ AskTheDocs revolutionizes how developers interact with documentation by allowing
 - **NextAuth.js** - Authentication framework
 - **JWT** - Secure token-based auth
 - **URL Validation** - Security checks for crawling targets
-- **Rate Limiting** - Built-in crawling limits
 
 ### Infrastructure
 
-- **Vercel** - Deployment platform
+- **Vercel** - Free Deployment platform
 - **Redis** - Caching layer
 - **Ably** - Real-time messaging
 - **Environment-based Configuration** - Secure credential management
@@ -202,7 +192,6 @@ askthedocs/
 - `POST /api/chat/sessions` - Create new chat session
 - `GET /api/chat/sessions/[sessionId]` - Get specific session
 - `POST /api/chat/sessions/[sessionId]/attach` - Attach documentation to session
-- `POST /api/chat/sessions/[sessionId]/ask` - Ask question (non-streaming)
 - `POST /api/chat/sessions/[sessionId]/ask/stream` - Ask question (streaming)
 - `POST /api/chat/sessions/[sessionId]/ask/compare` - Compare technologies
 
@@ -212,7 +201,6 @@ askthedocs/
 
 ### Development & Testing
 
-- `GET /api/test/debug` - Debug Qdrant collection contents
 - `GET /api/test/crawl-status` - Check crawling status
 - `GET /api/test/qdrant-setup` - Initialize Qdrant collection
 
@@ -225,10 +213,6 @@ askthedocs/
 5. **Get Contextual Answers**: Receive answers with source links and code examples
 6. **Compare Technologies**: Use the comparison feature to understand differences
 
-## Contributing
-
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
-
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
@@ -237,8 +221,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 If you encounter any issues or have questions:
 
-1. Check the [Issues](https://github.com/yourusername/askthedocs/issues) page
-2. Create a new issue with detailed information
-3. Join our community discussions
+1. Tell me directly on LinkedIn (https://www.linkedin.com/in/muhammad-ihsan-171672202/)
 
 ---

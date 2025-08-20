@@ -11,18 +11,8 @@ import { AuthModal } from "./components/auth/auth-modal";
 import { Toast } from "./components/ui/toast";
 import { Sidebar } from "./components/layout/sidebar";
 import { CrawlProgressModal } from "./components/ui/crawl-progress-modal";
+import { CrawlStatus, ToastState, UserInfo } from "@/types/frontend/home";
 
-type ToastState = {
-  message?: string;
-  type?: "error" | "info" | "success";
-  visible: boolean;
-};
-
-interface UserInfo {
-  email: string;
-  name?: string;
-  image?: string;
-}
 
 export default function HomePage() {
   const router = useRouter();
@@ -33,14 +23,7 @@ export default function HomePage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
-  const [crawlStatus, setCrawlStatus] = useState<{
-    isVisible: boolean;
-    status: "idle" | "crawling" | "complete" | "error";
-    progress: number;
-    message: string;
-    url?: string;
-    sessionId?: string;
-  }>({
+  const [crawlStatus, setCrawlStatus] = useState<CrawlStatus>({
     isVisible: false,
     status: "idle",
     progress: 0,
