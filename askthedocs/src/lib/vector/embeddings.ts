@@ -1,7 +1,7 @@
 // lib/vector/embeddings.ts - Updated searchSnippets method
 
 import OpenAI from "openai";
-import { encoding_for_model } from "tiktoken";
+import { encodingForModel } from "js-tiktoken";
 import { qdrant } from "./qdrant";
 import { ExtractedSnippet } from "@/types/snippet";
 import { SnippetSearchResult } from "@/types/snippet";
@@ -15,7 +15,7 @@ export class EmbeddingService {
   private encoder;
 
   constructor() {
-    this.encoder = encoding_for_model("text-embedding-3-small");
+    this.encoder = encodingForModel("text-embedding-3-small");
   }
 
   // Count tokens before embedding

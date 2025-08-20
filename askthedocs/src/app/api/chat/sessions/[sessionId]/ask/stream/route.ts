@@ -5,7 +5,9 @@ import OpenAI from "openai";
 import { embeddingService } from "@/lib/vector/embeddings";
 import type { ChatSession, Message } from "@/types/db";
 import { SnippetSearchResult } from "@/types/snippet";
-
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 10;
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
@@ -181,12 +183,15 @@ function identifyTargetDocs(
     confidence: 0.3
   };
 }
-
+export async function OPTIONS(req: NextRequest) {
+  return new Response(null, { status: 200 });
+}
 export async function POST(
   req: NextRequest,
   { params }: { params: { sessionId: string } }
 ) {
   try {
+     console.log("POST function called");
     const userEmail = req.headers.get("x-user-email");
     if (!userEmail) {
       return new Response("Unauthorized", { status: 401 });
