@@ -4,13 +4,30 @@ import { CrawlProgressData } from "@/types/frontend/chat";
 
 export function useAblyConnection(
   userEmail: string | null,
-  handleCrawlProgress: (data: CrawlProgressData) => void
+  handleCrawlProgress: (data: CrawlProgressData) => void,
+  shouldConnect: boolean = false, // Add conditional connection
+  autoDisconnect: boolean = true, // Add auto-disconnect
+  disconnectOn: string[] = ["complete", "error"] // Statuses that trigger disconnect
 ) {
   const ablyRef = useRef<Ably.Realtime | null>(null);
+
+  const disconnect = useCallback(() => {
+    if (ablyRef.current) {
+      console.log("Disconnecting Ably...");
+      ablyRef.current.close();
+      ablyRef.current = null;
+    }
+  }, []);
 
   const initializeAbly = useCallback(async (userEmail: string) => {
     if (!userEmail) {
       console.error("Cannot initialize Ably without user email");
+      return;
+    }
+    
+    // Don't create duplicate connections
+    if (ablyRef.current) {
+      console.log("Ably already connected");
       return;
     }
 
@@ -21,7 +38,10 @@ export function useAblyConnection(
       const ably = new Ably.Realtime({
         authCallback: (params, callback) => {
           callback(null, tokenRequest);
-        }
+        },
+        closeOnUnload: true, // Close connection when page unloads
+        autoConnect: true, // Connect automatically
+        echoMessages: false, // Don't receive messages you publish
       });
       
       ablyRef.current = ably;
@@ -32,6 +52,12 @@ export function useAblyConnection(
       channel.subscribe("progress", (message) => {
         console.log("Progress update received:", message.data);
         handleCrawlProgress(message.data as CrawlProgressData);
+        
+        // Auto-disconnect on completion or error
+        if (autoDisconnect && disconnectOn.includes(message.data.status)) {
+          console.log(`Auto-disconnecting due to status: ${message.data.status}`);
+          setTimeout(() => disconnect(), 1000); // Small delay to ensure message is processed
+        }
       });
 
       ably.connection.on('connected', () => {
@@ -40,17 +66,22 @@ export function useAblyConnection(
 
       ably.connection.on('failed', (error) => {
         console.error('Ably connection failed:', error);
+        disconnect(); // Clean up on failure
       });
     } catch (error) {
       console.error("Failed to initialize Ably:", error);
     }
-  }, [handleCrawlProgress]);
+  }, [handleCrawlProgress, autoDisconnect, disconnectOn, disconnect]);
 
   useEffect(() => {
-    if (userEmail) {
+    // Only connect when shouldConnect is true
+    if (userEmail && shouldConnect) {
       initializeAbly(userEmail);
+    } else if (!shouldConnect && ablyRef.current) {
+      // Disconnect when shouldConnect becomes false
+      disconnect();
     }
-  }, [userEmail, initializeAbly]);
+  }, [userEmail, shouldConnect, initializeAbly, disconnect]);
 
   useEffect(() => {
     return () => {
