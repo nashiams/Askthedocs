@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { useInput } from "@/app/providers/input-context";
 import { Sidebar } from "@/app/components/layout/sidebar";
@@ -12,7 +12,7 @@ import { useToast } from "@/app/hooks/use-toast";
 import { useSessionData } from "@/app/hooks/use-session-data";
 import { useMessageHandling } from "@/app/hooks/use-message-handling";
 import { useAblyConnection } from "@/app/hooks/use-ably-connection";
-import { handleCrawlProgress } from "@/utils/crawl-progress";
+import { handleCrawlProgress as originalHandleCrawlProgress } from "@/utils/crawl-progress";
 import { handleAttachDoc } from "@/utils/attach-document";
 import { MobileOverlay } from "@/app/components/chat/mobile-overlay";
 import { ChatHeader } from "@/app/components/chat/chat-header";
@@ -42,19 +42,46 @@ export default function ChatSessionPage() {
   const [showDocsPanel, setShowDocsPanel] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   
-  // Initialize Ably connection
-  useAblyConnection(userInfo?.email || null, (data) => 
-    handleCrawlProgress(data, setAttachedDocs, setToast)
-  );
+  // Add state for tracking if we're attaching a document
+  const [isAttaching, setIsAttaching] = useState(false);
 
+  // Update the handleCrawlProgress function
+  const handleCrawlProgress = useCallback((data: any) => {
+    if (data.status === "crawling" || data.status === "embedding") {
+      // Show progress...
+      originalHandleCrawlProgress(data, setAttachedDocs, setToast);
+    } else if (data.status === "complete") {
+      // Document attached successfully
+      setIsAttaching(false); // Stop Ably connection
+      // ... rest of your logic
+      originalHandleCrawlProgress(data, setAttachedDocs, setToast);
+    } else if (data.status === "error") {
+      // Handle error
+      setIsAttaching(false); // Stop Ably connection
+      // ... rest of your logic
+      originalHandleCrawlProgress(data, setAttachedDocs, setToast);
+    }
+  }, [setAttachedDocs, setToast]);
+  
+  // Use the updated hook with conditional connection
+  useAblyConnection(
+    userInfo?.email || null,
+    handleCrawlProgress,
+    isAttaching, // Only connect when attaching docs
+    true, // Auto-disconnect on complete/error
+    ["complete", "error"] // Disconnect on these statuses
+  );
 
   const onSendMessage = async () => {
     await handleSendMessage(inputValue);
     clearInput();
   };
 
+  // Update onAttachDoc to trigger connection
   const onAttachDoc = async (url: string) => {
+    setIsAttaching(true); // This will trigger Ably connection
     await handleAttachDoc(sessionId, url, setAttachedDocs, setToast, setShowAttachModal);
+    // Note: setIsAttaching(false) will be called in handleCrawlProgress on complete/error
   };
 
   return (

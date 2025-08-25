@@ -16,7 +16,7 @@ const openai = new OpenAI({
 async function searchMultipleDocs(
   query: string,
   attachedDocs: string[],
-  snippetsPerDoc: number = 5
+  snippetsPerDoc: number = 3
 ): Promise<SnippetSearchResult[]> {
   // First, get all results without filtering
   const totalLimit = Math.max(50, attachedDocs.length * snippetsPerDoc * 4);
