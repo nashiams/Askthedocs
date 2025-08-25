@@ -1,5 +1,4 @@
-import { Menu } from "lucide-react";
-import { DocInput } from "../chat/doc-input";
+
 import { Sidebar } from "../layout/sidebar";
 import { CrawlProgressModal } from "../ui/crawl-progress-modal";
 import { Toast } from "../ui/toast";
