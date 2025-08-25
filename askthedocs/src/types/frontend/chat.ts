@@ -30,8 +30,10 @@ export interface SessionData {
 }
 
 export interface CrawlProgressData {
+  message?: string;
+  sessionId?: boolean;
   url?: string;
-  status: string;
+  status?: string;
   percentage?: number;
 }
 
