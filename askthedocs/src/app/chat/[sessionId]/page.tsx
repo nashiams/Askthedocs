@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { useInput } from "@/app/providers/input-context";
+import { CrawlProgressData } from "@/types/frontend/chat";
 import { Sidebar } from "@/app/components/layout/sidebar";
 import { AttachedDocsPanel } from "@/app/components/chat/attached-docs-panel";
 import { AttachDocModal } from "@/app/components/chat/attach-doc-modal";
@@ -18,7 +19,6 @@ import { MobileOverlay } from "@/app/components/chat/mobile-overlay";
 import { ChatHeader } from "@/app/components/chat/chat-header";
 import { MessagesArea } from "@/app/components/chat/message-area";
 import { ChatInput } from "@/app/components/chat/chat-input";
-
 
 export default function ChatSessionPage() {
   const params = useParams();
@@ -46,7 +46,7 @@ export default function ChatSessionPage() {
   const [isAttaching, setIsAttaching] = useState(false);
 
   // Update the handleCrawlProgress function
-  const handleCrawlProgress = useCallback((data: any) => {
+  const handleCrawlProgress = useCallback((data: CrawlProgressData) => {
     if (data.status === "crawling" || data.status === "embedding") {
       // Show progress...
       originalHandleCrawlProgress(data, setAttachedDocs, setToast);

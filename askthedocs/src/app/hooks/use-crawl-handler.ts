@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { CrawlStatus, ToastState } from "@/types/frontend/home";
+import { CrawlProgressData } from "@/types/frontend/chat";
 import { validateUrl } from "@/utils/url-validator";
 
 export function useCrawlHandler(
@@ -14,8 +15,7 @@ export function useCrawlHandler(
     message: ""
   });
   const [isCrawling, setIsCrawling] = useState(false);
-
-  const handleCrawlProgress = useCallback((data: any) => {
+  const handleCrawlProgress = useCallback((data: CrawlProgressData) => {
     if (data.status === "crawling" || data.status === "embedding") {
       setCrawlStatus(prev => ({
         ...prev,
